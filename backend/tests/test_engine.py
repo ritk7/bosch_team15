@@ -248,3 +248,14 @@ def test_fixes_and_map_corrections_work_without_a_cloned_app(tmp_path, monkeypat
     t = VotingTarget(missing)
     assert VotingTarget.state_dir(t) == tmp_path / "cache" / "voting"
     assert not missing.exists()
+
+
+def test_twin_rehearses_the_whole_catalog():
+    async def go():
+        e = make_engine()
+        tw = await e.run_twin(speed=60)
+        return e, tw
+
+    e, tw = run(go())
+    assert len(tw["rows"]) == len(e.catalog)  # a placeholder baseline once made every rehearsal fail the health gate
+    assert e.compare and e.compare["planner_runs_to_top3"] is not None

@@ -562,7 +562,7 @@ class Engine:
 
         self.twin = {"status": "running", "rows": [], "ran_at": time.time()}
         twin = Engine(self.target, SimRunner(self.target, Clock(speed)), rate=self.rate, persist=False)
-        twin.baseline = {"rps": self.rate, "error_pct": 0.0, "p95_ms": 10.0, "votes_sent": 0, "votes_stored": 0}
+        # the twin measures its own baseline, so the same "healthy baseline before any fault" gate applies to it
         started = time.perf_counter()
         fan = {n["id"]: n["fan_in"] for n in self.graph["nodes"]}
         for exp in twin.catalog:
