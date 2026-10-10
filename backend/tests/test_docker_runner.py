@@ -19,6 +19,8 @@ class FakeExec:
         self.calls.append(args)
         if args[1:3] == ["inspect", "-f"]:
             return 0, "4242", ""
+        if args[1:2] == ["info"]:
+            return 0, "8", ""
         if "ps" in args:
             return 0, "\n".join(json.dumps(r) for r in self.ps_rows), ""
         return 0, "", ""
@@ -99,3 +101,12 @@ def test_netem_runs_only_in_the_target_container_namespace():
     assert "netem delay 500ms" in run_call[-1]
     with pytest.raises(ValueError):
         asyncio.run(r.set_net("redis", "delay 5ms; rm -rf /"))
+
+
+def test_cpu_limit_is_lifted_to_all_cpus_not_zero():
+    r, fake = make()
+    asyncio.run(r.set_cpus("db", 0.1))
+    asyncio.run(r.set_cpus("db", None))
+    updates = [c for c in fake.calls if c[1] == "update"]
+    assert updates[0][2:4] == ["--cpus", "0.1"]
+    assert updates[1][2:4] == ["--cpus", "8"]  # `--cpus 0` silently keeps the old limit (measured)

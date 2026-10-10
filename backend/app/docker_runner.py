@@ -263,7 +263,14 @@ class DockerRunner:
     async def set_cpus(self, svc: str, cpus: float | None) -> None:
         self._check(svc)
         container = await self._container(svc)
-        code, _, err = await self.exe([self.docker, "update", "--cpus", str(cpus or 0), container], 10.0)
+        if not cpus:
+            # measured: `docker update --cpus 0` exits 0 but silently keeps the old limit. Lifting it to every CPU of
+            # the Docker VM removes the limit in practice.
+            code, out, _ = await self.exe([self.docker, "info", "--format", "{{.NCPU}}"], 10.0)
+            limit = out.strip() if code == 0 and out.strip().isdigit() else "64"
+        else:
+            limit = str(cpus)
+        code, _, err = await self.exe([self.docker, "update", "--cpus", limit, container], 10.0)
         if code != 0:
             raise RuntimeError(f"docker update failed: {err.strip()[:200]}")
         self.cpus[svc] = cpus
