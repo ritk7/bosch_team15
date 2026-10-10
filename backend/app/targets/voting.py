@@ -88,7 +88,12 @@ class VotingTarget:
                  "title": "Pause worker, then crash redis",
                  "description": "Freeze the worker so votes pile up in Redis, then kill Redis 4 s later. Votes were "
                                 "acknowledged with HTTP 200; do they survive?",
-                 "params": {"steps": "pause:worker,crash:redis", "delay_s": 4}, "risk_hint": 1.0}]
+                 "params": {"steps": "pause:worker,crash:redis", "delay_s": 4}, "risk_hint": 1.0},
+                {"id": "compound-worker-crash-traffic-spike", "type": "compound", "target": "worker",
+                 "title": "Traffic spike while the worker is down",
+                 "description": "Crash the worker, then send 6 times the normal traffic 3 s later. How big does the "
+                                "backlog get, and how long until votes are stored again?",
+                 "params": {"steps": "crash:worker,spike:6", "delay_s": 3}, "risk_hint": 0.85}]
 
     def make_sim(self, clock: Clock, policies: dict) -> SimVoting:
         return SimVoting(clock, policies)

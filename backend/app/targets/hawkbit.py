@@ -278,7 +278,12 @@ class HawkbitTarget:
                  "title": "Cut rabbitmq, then crash mysql",
                  "description": "Take the messaging bus away, then kill the database 4 s later, mid-rollout. "
                                 "Do devices end up updated or stuck?",
-                 "params": {"steps": "disconnect:rabbitmq,crash:mysql", "delay_s": 4}, "risk_hint": 1.0}]
+                 "params": {"steps": "disconnect:rabbitmq,crash:mysql", "delay_s": 4}, "risk_hint": 1.0},
+                {"id": "compound-mysql-hang-traffic-spike", "type": "compound", "target": "mysql",
+                 "title": "Device surge while mysql is frozen",
+                 "description": "Freeze MySQL, then send 6 times the normal device traffic 3 s later, like a "
+                                "fleet-wide rollout hitting a stalled database.",
+                 "params": {"steps": "pause:mysql,spike:6", "delay_s": 3}, "risk_hint": 0.85}]
 
     def make_sim(self, clock: Clock, policies: dict) -> SimHawkbit:
         return SimHawkbit(clock, policies)

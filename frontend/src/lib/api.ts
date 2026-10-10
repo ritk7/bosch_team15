@@ -82,6 +82,7 @@ export interface Prediction {
   confidence: Confidence;
   reason: string;
   hypothesis: string;
+  recommended_fault_s?: number;
   decided_by: Source;
   model: string;
 }

@@ -83,7 +83,7 @@ interface Experiment { id: string; type: FailureType; target: string; title: str
 
 interface Prediction { experiment_id: string; summary: string; expected_error_pct: number; expected_votes_lost: number;
   expected_recovery_s: number; confidence: "low" | "medium" | "high"; reason: string; hypothesis: string;
-  decided_by: Source; model: string; }
+  recommended_fault_s: number /* how safely: shorter windows for riskier experiments */; decided_by: Source; model: string; }
 
 type VoteState = "ok" | "queued" | "error" | "lost" | "pending";       // one cell of the fleet grid
 interface TimelinePoint { t: number /* s since inject start */; ok: number; err: number; p95_ms: number;

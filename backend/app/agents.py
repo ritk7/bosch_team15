@@ -104,4 +104,7 @@ async def predict(exp: dict, graph: dict, *, entry: str, sync: set[str], rate: f
         ledger.record_rule(task="predict", tokens_in=ledger.estimate_tokens(SYSTEM + prompt),
                            tokens_out=ledger.estimate_tokens(json.dumps(rules)))
         p, source, model = rules, "rules", "rules engine"
-    return {"experiment_id": exp["id"], "summary": _summary(p, unit_plural, unit_singular), **p, "decided_by": source, "model": model}
+    from .injectors import recommended_fault_s
+
+    return {"experiment_id": exp["id"], "summary": _summary(p, unit_plural, unit_singular), **p,
+            "recommended_fault_s": recommended_fault_s(exp), "decided_by": source, "model": model}

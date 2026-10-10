@@ -10,7 +10,7 @@ import secrets
 import time
 
 from . import agents, analysis, config, fixes, injectors, ledger, mapper, planner, score, state
-from .guard import Guard
+from .guard import Guard, Thresholds
 from .probe import Probe, p95
 from .runner import differs
 
@@ -29,7 +29,7 @@ class Engine:
         self.target, self.runner = target, runner
         self.clock = runner.clock
         self.rate = rate or config.PROBE_RATE
-        self.guard = Guard()
+        self.guard = Guard()  # thresholds set in refresh_graph (blast radius depends on the app's size)
         self.phase = "idle"
         self.current: dict | None = None
         self.results: list[dict] = []
@@ -40,6 +40,7 @@ class Engine:
         self._probe: Probe | None = None
         self._services: list[dict] = []
         self._cleanups: list = []
+        self._targets: set[str] = set()
         self._expected: dict | None = None  # service states at the first run: the healthy app
         self.analysis: dict | None = None
         self.fixes: dict | None = None
@@ -56,6 +57,9 @@ class Engine:
         self.sync = mapper.sync_path(self.graph, self.target.entry)
         self.order = mapper.topo_order(self.graph)
         self.catalog = injectors.catalog(self.graph, self.sync, self.target.entry, self.target.extra_experiments(self.graph))
+        # blast radius: collateral services (not faulted on purpose). Small apps get a tighter limit.
+        n = len(self.graph["nodes"])
+        self.guard.base = self.guard.thresholds = Thresholds(unhealthy=2 if n >= 4 else 1)
 
     def experiment(self, exp_id: str) -> dict:
         for e in self.catalog:
@@ -146,7 +150,10 @@ class Engine:
         exp = self.experiment(exp_id)
         run_id = f"r{secrets.token_hex(3)}"
         self.error = None
-        self.task = asyncio.create_task(self.run(run_id, exp, label, fault_s or config.FAULT_S))
+        if not fault_s:  # how safely: the planner's window, else shorter for riskier experiments
+            pred = self.predictions.get(exp_id) or {}
+            fault_s = pred.get("recommended_fault_s") or injectors.recommended_fault_s(exp)
+        self.task = asyncio.create_task(self.run(run_id, exp, label, fault_s))
         return run_id
 
     async def run(self, run_id: str, exp: dict, label: str, fault_s: float) -> dict | None:
@@ -176,13 +183,25 @@ class Engine:
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
             probe.start()
-            self.phase = "baseline"  # a moment of normal traffic before the fault
+            self.phase = "baseline"  # when: only inject into a steady app
             await self._watch(probe, until=self.t0, t_begin=t_begin, fault_s=fault_s)
+            steady_by = self.clock.now() + 10.0
+            while True:
+                w = probe.window(self.clock.now(), span=2.0)
+                if w["completed"] >= 5 and w["error_rate"] == 0 and w["p95_ms"] < 1000:
+                    break
+                if self.clock.now() > steady_by:
+                    raise RuntimeError(f"App not steady before the fault (errors {w['error_rate']:.0%}, "
+                                       f"p95 {w['p95_ms']:.0f} ms); nothing was injected")
+                await self._tick(probe, t_begin, fault_s)
+                await self.clock.sleep(0.5)
+            self.t0 = self.clock.now()
 
             self.phase = "inject"
             if self.persist:
                 state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
-            self.guard.arm()  # never a fault without the guard
+            self.guard.arm(self.baseline["p95_ms"] if self.baseline else None)  # never a fault without the guard
+            self._targets = injectors.targets_of(exp)
             self._cleanups = await injectors.apply(self.runner, exp, probe)
             self.phase = "observe"
             await self._watch(probe, until=self.t0 + fault_s, t_begin=t_begin, fault_s=fault_s, guarded=True)
@@ -275,7 +294,10 @@ class Engine:
     async def _tick(self, probe: Probe, t_begin: float, fault_s: float) -> None:
         now = self.clock.now()
         self._services = await self.runner.services()
-        unhealthy = sum(s["state"] != "running" or s["health"] == "unhealthy" for s in self._services)
+        # blast radius = services down or unhealthy that were not faulted on purpose
+        on_purpose = self._targets if self.guard.armed else set()
+        unhealthy = sum((s["state"] != "running" or s["health"] == "unhealthy") and s["id"] not in on_purpose
+                        for s in self._services)
         w = probe.window(now)
         self.guard.check(error_rate=w["error_rate"], completed=w["completed"], p95_ms=w["p95_ms"],
                          unhealthy=unhealthy, wall_s=now - t_begin)

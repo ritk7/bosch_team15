@@ -161,3 +161,31 @@ def test_hawkbit_map_and_units():
     assert sorted(n["id"] for n in g["nodes"]) == ["hawkbit", "mysql", "rabbitmq"]
     assert {n["id"]: n["restart"] for n in g["nodes"]} == {"hawkbit": "always", "mysql": "always", "rabbitmq": "on-failure"}
     assert t.unit["plural"] == "devices"
+
+
+def test_traffic_spike_while_worker_down_raises_rate_then_restores():
+    async def go():
+        e = make_engine()
+        r = await e.run("tspike", e.experiment("compound-worker-crash-traffic-spike"), "before", 8.0)
+        return e, r
+
+    e, r = run(go())
+    assert r["outcome"]["sent"] > 60  # 6x traffic for part of the window
+    assert r["outcome"]["errors"] == 0  # vote keeps answering; votes queue up
+
+
+def test_blast_radius_ignores_services_faulted_on_purpose():
+    async def go():
+        e = make_engine()
+        return await e.run("tghost2", e.experiment("compound-worker-hang-redis-crash"), "before", 6.0)
+
+    o = run(go())["outcome"]
+    assert not (o["guard_reason"] or "").startswith("2 other services")  # worker + redis are the experiment itself
+
+
+def test_guard_latency_limit_is_relative_to_baseline():
+    g = Guard()
+    g.arm(baseline_p95_ms=500)
+    assert g.thresholds.p95_ms == 5000  # 10x a slow baseline
+    g.arm(baseline_p95_ms=20)
+    assert g.thresholds.p95_ms == 3000  # never below the 3 s floor

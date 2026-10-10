@@ -62,9 +62,9 @@ export function GuardCard({ guard, last, wallS, phase, busy, onKill, killing }: 
           text={`${Math.round((last?.error_rate ?? 0) * 100)}% / ${th.error_rate * 100}%`} />
         <Meter label="p95 latency" value={last?.p95_ms ?? 0} limit={th.p95_ms}
           text={`${((last?.p95_ms ?? 0) / 1000).toFixed(2)} s / ${th.p95_ms / 1000} s`} />
-        <Meter label="Services down or unhealthy" value={last?.unhealthy ?? 0} limit={th.unhealthy}
+        <Meter label="Other services down (blast radius)" value={last?.unhealthy ?? 0} limit={th.unhealthy}
           text={`${last?.unhealthy ?? 0} / ${th.unhealthy}`} />
-        <Meter label="Experiment time" value={wallS} limit={th.max_wall_s} text={`${Math.round(wallS)} s / ${th.max_wall_s} s`} />
+        <Meter label="Time since the fault" value={wallS} limit={th.max_wall_s} text={`${Math.round(wallS)} s / ${th.max_wall_s} s`} />
       </div>
 
       <button

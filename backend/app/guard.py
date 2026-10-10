@@ -1,7 +1,7 @@
 """The kill switch. Plain code, never a model: any breached threshold stops the fault and restores the services."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 MIN_SAMPLES = 5  # do not judge an error rate on fewer completed units than this
 
@@ -10,18 +10,22 @@ MIN_SAMPLES = 5  # do not judge an error rate on fewer completed units than this
 class Thresholds:
     error_rate: float = 0.6  # over the last 3 s
     p95_ms: float = 3000.0
-    unhealthy: int = 3  # blast radius: services not running or unhealthy
+    unhealthy: int = 3  # blast radius: services down or unhealthy *besides the ones faulted on purpose*
     max_wall_s: float = 45.0
 
 
 class Guard:
     def __init__(self, thresholds: Thresholds | None = None):
-        self.thresholds = thresholds or Thresholds()
+        self.base = thresholds or Thresholds()
+        self.thresholds = self.base
         self.armed = False
         self.tripped = False
         self.reason: str | None = None
 
-    def arm(self) -> None:
+    def arm(self, baseline_p95_ms: float | None = None) -> None:
+        """Latency limit is relative to the measured baseline (10x normal), never below the fixed 3 s floor."""
+        p95 = max(self.base.p95_ms, 10 * baseline_p95_ms) if baseline_p95_ms else self.base.p95_ms
+        self.thresholds = replace(self.base, p95_ms=round(p95))
         self.armed, self.tripped, self.reason = True, False, None
 
     def disarm(self) -> None:
@@ -38,7 +42,7 @@ class Guard:
         elif p95_ms >= th.p95_ms:
             reason = f"p95 latency {p95_ms / 1000:.1f} s reached the {th.p95_ms / 1000:.1f} s limit"
         elif unhealthy >= th.unhealthy:
-            reason = f"{unhealthy} services unhealthy reached the blast-radius limit of {th.unhealthy}"
+            reason = f"{unhealthy} other services went down, reaching the blast-radius limit of {th.unhealthy}"
         elif wall_s > th.max_wall_s:
             reason = f"Experiment ran {wall_s:.0f} s, over the {th.max_wall_s:.0f} s limit"
         if reason:

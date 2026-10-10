@@ -16,7 +16,7 @@ NODE_KEYS = {"id", "role", "image", "ports", "healthcheck", "restart", "stateful
 OUTCOME_KEYS = {"sent", "acked", "stored", "lost", "errors", "error_pct", "p95_ms", "peak_p95_ms", "recovery_s",
                 "availability_pct", "guard_tripped", "guard_reason", "data_loss"}
 PREDICTION_KEYS = {"experiment_id", "summary", "expected_error_pct", "expected_votes_lost", "expected_recovery_s",
-                   "confidence", "reason", "hypothesis", "decided_by", "model"}
+                   "confidence", "reason", "hypothesis", "recommended_fault_s", "decided_by", "model"}
 
 
 def test_contract_shapes_and_a_full_run(tmp_path, monkeypatch):

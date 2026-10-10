@@ -26,7 +26,8 @@ export function PredictionCard({ prediction, unit }: { prediction: Prediction; u
         ))}
       </dl>
       <p className="mt-3 text-[0.8rem] text-graphite">
-        Hypothesis: {prediction.hypothesis}. Confidence {prediction.confidence}. Decided by{" "}
+        Hypothesis: {prediction.hypothesis}. Confidence {prediction.confidence}.
+        {prediction.recommended_fault_s ? ` Fault window ${prediction.recommended_fault_s} s (riskier experiments get shorter windows).` : ""} Decided by{" "}
         {SOURCE_LABEL[prediction.decided_by] ?? prediction.decided_by}
         {prediction.decided_by !== "rules" ? ` (${prediction.model})` : ""}.
       </p>
@@ -80,7 +81,7 @@ export function Reveal({ result, unit, human }: { result: ExperimentResult; unit
         );
       })()}
       <p className="mt-3 text-[0.8rem] text-graphite">
-        {o.sent} {unit.plural} sent, {o.acked} acknowledged, {o.stored} {unit.stored}
+        {o.sent} {o.sent === 1 ? unit.singular : unit.plural} sent, {o.acked} acknowledged, {o.stored} {unit.stored}
         {o.lost ? `, ${o.lost} ${unit.lost}` : ""}. Peak p95 {Math.round(o.peak_p95_ms)} ms.{" "}
         {o.guard_tripped ? `The guard stopped the fault: ${o.guard_reason?.toLowerCase()}.` : "The guard did not need to step in."}
       </p>

@@ -57,7 +57,26 @@ def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[d
     return sorted(out, key=lambda e: (-e["risk_hint"], e["id"]))
 
 
-async def _step(runner, action: str, svc: str) -> None:
+def targets_of(exp: dict) -> set[str]:
+    """Services an experiment faults on purpose (the rest count towards the blast radius)."""
+    out = {exp["target"]}
+    if exp["type"] == "compound":
+        out |= {s.split(":")[1] for s in str(exp["params"].get("steps", "")).split(",")
+                if ":" in s and not s.startswith("spike")}
+    return out
+
+
+def recommended_fault_s(exp: dict) -> float:
+    """How safely: the riskier the experiment, the shorter its fault window."""
+    r = exp.get("risk_hint", 0.5)
+    return 6.0 if r >= 0.8 else 8.0 if r >= 0.5 else 10.0
+
+
+async def _step(runner, action: str, svc: str, probe=None) -> None:
+    if action == "spike":
+        if probe is not None:
+            probe.rate = probe.rate * float(svc)
+        return
     if action == "crash":
         await runner.crash(svc)
     elif action == "pause":
@@ -90,19 +109,22 @@ async def apply(runner, exp: dict, probe=None) -> list[Cleanup]:
 
         return [calm]
     elif kind == "compound":
-        steps = [s.split(":") for s in str(p["steps"]).split(",")]  # "pause:worker,crash:redis"
-        await _step(runner, *steps[0])
+        steps = [s.split(":") for s in str(p["steps"]).split(",")]  # "pause:worker,crash:redis" or "crash:worker,spike:6"
+        normal = probe.rate if probe is not None else None
+        await _step(runner, *steps[0], probe=probe)
 
         async def later() -> None:
             for action, svc in steps[1:]:
                 await asyncio.sleep(float(p.get("delay_s", 4)) / runner.clock.speed)
-                await _step(runner, action, svc)
+                await _step(runner, action, svc, probe=probe)
 
         task = asyncio.create_task(later())
 
         async def cancel() -> None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+            if probe is not None and normal is not None:
+                probe.rate = normal
 
         return [cancel]
     else:
