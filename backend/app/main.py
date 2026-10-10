@@ -231,6 +231,33 @@ def architecture_md() -> PlainTextResponse:
                              headers={"Content-Disposition": 'attachment; filename="architecture.md"'})
 
 
+@app.get("/metrics")
+async def metrics() -> PlainTextResponse:
+    """Prometheus text format, so Prometheus/Grafana (docker-compose.observability.yml) can chart our measurements."""
+    e = eng()
+    st = await e.state_json()
+    t = e.target.name
+    out = ["# TYPE chaos_service_up gauge"]
+    for s in st["services"]:
+        out.append(f'chaos_service_up{{target="{t}",service="{s["id"]}"}} {1 if s["state"] == "running" else 0}')
+        if s["cpu_pct"] is not None:
+            out.append(f'chaos_container_cpu_percent{{target="{t}",service="{s["id"]}"}} {s["cpu_pct"]}')
+            out.append(f'chaos_container_memory_mb{{target="{t}",service="{s["id"]}"}} {s["mem_mb"]}')
+    cur = st["current"]
+    if cur:
+        for k, v in cur["counters"].items():
+            out.append(f'chaos_units{{target="{t}",kind="{k}"}} {v}')
+        if cur["timeline"]:
+            p = cur["timeline"][-1]
+            out += [f'chaos_error_rate{{target="{t}"}} {p["error_rate"]}', f'chaos_p95_ms{{target="{t}"}} {p["p95_ms"]}']
+        out.append(f'chaos_guard_tripped{{target="{t}"}} {1 if cur["guard"]["tripped"] else 0}')
+        out.append(f'chaos_fault_active{{target="{t}"}} {1 if st["phase"] in ("inject", "observe") else 0}')
+    if st["analysis"]:
+        out.append(f'chaos_resilience_score{{target="{t}"}} {st["analysis"]["score"]["value"]}')
+    out.append(f'chaos_model_cost_inr_total {st["cost"]["cost_inr"]}')
+    return PlainTextResponse("\n".join(out) + "\n", media_type="text/plain; version=0.0.4")
+
+
 @app.get("/api/snapshot")
 async def snapshot() -> dict:
     return state.load_snapshot(eng().target.name) or await eng().state_json()

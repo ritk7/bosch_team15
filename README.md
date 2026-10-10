@@ -22,6 +22,7 @@ Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-a
 | Errors, slowdowns, recovery | Every run: error %, p95 and peak p95, recovery time, units lost silently, timeline and a 100-unit grid |
 | Findings, fixes, score | Ranked findings with measured evidence (the model may reword, never invent numbers), fixes with compose snippets, deterministic resilience score with breakdown |
 | Stretch goals | Live dashboard; combined failures (ghost votes); apply a fix and re-run: on real Docker the score went **57 → 74** after `restart: unless-stopped` |
+| Observability tool | Prometheus + Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map |
 | Low cost | Rules first, small model second (Claude Haiku via an OpenAI-compatible router), response cache, cost ledger. Works with no model at all |
 
 **Ghost votes** (verified on real Docker): pause the worker, then crash Redis. 224 votes got HTTP 200; 24 never reached
@@ -55,6 +56,13 @@ CI gate (fails the pipeline below a resilience score):
 
 ```bash
 cd backend && python -m app.cli gate --min-score 80 --budget 5 [--target hawkbit]
+```
+
+Observability (open-source, optional): Prometheus scrapes our live measurements from `/metrics` (units by state, error
+rate, p95, guard, score, per-container CPU and memory from `docker stats`) and Grafana shows them:
+
+```bash
+docker compose -p observability -f docker-compose.observability.yml up -d   # Grafana: http://localhost:3000/d/chaos-sentinel
 ```
 
 Checks: `python dev.py check` (backend tests, type check, UI build).

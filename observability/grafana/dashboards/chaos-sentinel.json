@@ -1,0 +1,286 @@
+{
+ "title": "Chaos Sentinel",
+ "uid": "chaos-sentinel",
+ "refresh": "2s",
+ "time": {
+  "from": "now-10m",
+  "to": "now"
+ },
+ "schemaVersion": 39,
+ "templating": {
+  "list": [
+   {
+    "name": "DS",
+    "type": "datasource",
+    "query": "prometheus",
+    "current": {}
+   }
+  ]
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "state-timeline",
+   "title": "Services up (1 = running)",
+   "gridPos": {
+    "x": 0,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_service_up",
+     "legendFormat": "{{service}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Error rate, last 3 s (probe)",
+   "gridPos": {
+    "x": 12,
+    "y": 0,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_error_rate",
+     "legendFormat": "error rate",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "p95 latency (probe)",
+   "gridPos": {
+    "x": 0,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_p95_ms",
+     "legendFormat": "p95",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ms"
+    },
+    "overrides": []
+   }
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Units this run",
+   "gridPos": {
+    "x": 12,
+    "y": 8,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_units",
+     "legendFormat": "{{kind}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Container memory (MB)",
+   "gridPos": {
+    "x": 0,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_container_memory_mb",
+     "legendFormat": "{{service}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Container CPU (%)",
+   "gridPos": {
+    "x": 12,
+    "y": 16,
+    "w": 12,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_container_cpu_percent",
+     "legendFormat": "{{service}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 7,
+   "type": "stat",
+   "title": "Resilience score",
+   "gridPos": {
+    "x": 0,
+    "y": 24,
+    "w": 6,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_resilience_score",
+     "legendFormat": "score",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 8,
+   "type": "stat",
+   "title": "Guard tripped",
+   "gridPos": {
+    "x": 6,
+    "y": 24,
+    "w": 6,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_guard_tripped",
+     "legendFormat": "guard",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 9,
+   "type": "stat",
+   "title": "Fault active",
+   "gridPos": {
+    "x": 12,
+    "y": 24,
+    "w": 6,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_fault_active",
+     "legendFormat": "fault",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  },
+  {
+   "id": 10,
+   "type": "stat",
+   "title": "Model spend (INR)",
+   "gridPos": {
+    "x": 18,
+    "y": 24,
+    "w": 6,
+    "h": 8
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${DS}"
+   },
+   "targets": [
+    {
+     "expr": "chaos_model_cost_inr_total",
+     "legendFormat": "INR",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": []
+   }
+  }
+ ]
+}

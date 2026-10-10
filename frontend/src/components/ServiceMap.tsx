@@ -212,6 +212,12 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
                   {word}
                 </text>
               </g>
+              {s?.mem_mb != null && (
+                <text x={x + W - 10} y={y + H + 13} textAnchor="end" className="fill-graphite text-[10px] tabular-nums">
+                  <title>Measured by docker stats</title>
+                  {s.cpu_pct?.toFixed(0)}% CPU · {Math.round(s.mem_mb)} MB
+                </text>
+              )}
               {n.spof && (
                 <text x={x + W - 10} y={y + 46} textAnchor="end" className="fill-graphite text-[10px]">
                   <title>Single point of failure: one replica, used by {n.fan_in} services</title>

@@ -111,6 +111,9 @@ class DockerRunner:
         self.connected: dict[str, bool] = {s: True for s in self.allowed}
         self.cpus: dict[str, float | None] = {s: None for s in self.allowed}
         self._client: DockerClient | None = None
+        self._stats: dict[str, tuple[float, float]] = {}  # container name -> (cpu %, memory MiB), from docker stats
+        self._stats_at = 0.0
+        self._stats_task: asyncio.Task | None = None
 
     # ---- command helpers -----------------------------------------------------------------------------------
     def compose_args(self, *args: str) -> list[str]:
@@ -153,9 +156,32 @@ class DockerRunner:
         running = sum(r.get("State") == "running" for r in rows if r.get("Service") in self.allowed)
         return running > 0, f"Docker project '{self.project}': {running}/{len(self.allowed)} services running"
 
+    def _refresh_stats(self, names: list[str]) -> None:
+        """docker stats takes ~3 s, so it runs in the background every few seconds and the UI reads the cache."""
+        loop = asyncio.get_running_loop()
+        if self._stats_task and not self._stats_task.done() or loop.time() - self._stats_at < 4 or not names:
+            return
+
+        async def go() -> None:
+            code, out, _ = await self.exe([self.docker, "stats", "--no-stream", "--format", "{{json .}}", *names], 15.0)
+            self._stats_at = loop.time()
+            if code != 0:
+                return
+            for line in out.splitlines():
+                try:
+                    d = json.loads(line)
+                    used = d["MemUsage"].split("/")[0].strip()
+                    mib = float(used[:-3]) * {"KiB": 1 / 1024, "MiB": 1, "GiB": 1024}.get(used[-3:], 1)
+                    self._stats[d["Name"]] = (float(d["CPUPerc"].rstrip("%")), round(mib, 1))
+                except (KeyError, ValueError, IndexError):
+                    continue
+
+        self._stats_task = asyncio.create_task(go())
+
     async def services(self) -> list[dict]:
         rows = {r.get("Service"): r for r in await self._ps()}
         names = [rows[s].get("Name") for s in self.allowed if s in rows and rows[s].get("Name")]
+        self._refresh_stats([rows[s]["Name"] for s in self.allowed if (rows.get(s) or {}).get("State") == "running"])
         restarts: dict[str, int] = {}
         if names:
             code, out, _ = await self.exe([self.docker, "inspect", "--format", "{{.Name}} {{.RestartCount}}", *names], 10.0)
@@ -171,8 +197,9 @@ class DockerRunner:
             health = "healthy" if health_raw == "healthy" else "unhealthy" if health_raw in ("unhealthy", "starting") else "none"
             if state == "running" and not self.connected[svc]:
                 state = "degraded"
+            cpu, mem = self._stats.get((row or {}).get("Name", ""), (None, None)) if state == "running" else (None, None)
             out_list.append({"id": svc, "state": state, "health": health,
-                             "restarts": restarts.get((row or {}).get("Name", ""), 0), "cpu_pct": None, "mem_mb": None})
+                             "restarts": restarts.get((row or {}).get("Name", ""), 0), "cpu_pct": cpu, "mem_mb": mem})
         return out_list
 
     async def snapshot(self) -> dict[str, dict]:

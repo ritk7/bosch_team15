@@ -24,8 +24,11 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 | 14:18 | **Analysis**: deterministic resilience score with breakdown, ranked findings with measured evidence (the model may reword, never invent numbers), fixes, engineer approval, compose override, re-run, before/after score (25.8 → 66.4 on the twin). | commit `Score, findings and fixes` |
 | 14:29 | **AI campaign planner** (adaptive, a reason for each pick) and **digital twin rehearsal** (15 experiments in 6 s). AI vs random computed on the twin: 3 runs vs 11.9 to find the top 3 weaknesses (voting app). | commit `AI campaign planner` |
 | 14:32 | Findings report and architecture overview generated from real runs, **CI gate** (`python -m app.cli gate --min-score 80`), Campaign and Report tabs. | commit `Report (findings + architecture), CI gate` |
-| plan 14:40–16:15 | Real-Docker check of the fix loop and the campaign, wow layer (living map, judge vs AI), polish, README. | |
-| plan 16:15 | Merge to `main` only if tests and the Docker selftest pass; otherwise submit the `milestone-1` tag. | |
+| 14:42 | **Fix loop proven on real Docker: score 57 → 74.** The first attempt revealed that a fast Redis restart kills the worker, so the fix agent now also covers dependent workers. The final safety check watches longer, and a pre-flight repairs anything left down. | commit `Fix loop proven on real Docker` |
+| 14:47 | **Living map** (units flow along data flows and pile up in red at a broken service; blast radius), **human vs AI** guess before each run, secondary-failure notes in the reveal. | commit `Living map` |
+| 14:50 | AI campaign on real Docker (3 picks by Claude Haiku). Model answers are now rejected if they quote numbers not in the measurements, cached answers included. Demo state survives restarts. | commits `Demo state survives restarts`, `Cached model answers` |
+| 14:57 | Full check plus a real Docker selftest, then **merged to `main`**. | merge commit |
+| 15:08 | **Observability**: Prometheus and Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map. | commit `Observability` |
 | plan 17:00 | Milestone 1 submission; shortlisting on the idea. | |
 
 ## Day 2: Sunday (plan)
