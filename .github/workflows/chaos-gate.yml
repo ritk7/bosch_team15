@@ -1,0 +1,21 @@
+# Example CI gate: fail the pipeline when the resilience score is below the threshold.
+# Needs a runner with Docker. Not yet verified; the `gate` command is built in Milestone 5 (see CLAUDE.md).
+name: chaos-gate
+on:
+  pull_request:
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt
+      - run: git clone --depth 1 https://github.com/dockersamples/example-voting-app targets/voting
+      - run: cd backend && RUNNER=docker python -m app.cli gate --min-score 80 --budget 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: chaos-report
+          path: reports/

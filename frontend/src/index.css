@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+/*
+  Design tokens. Use these names in classes (bg-paper, text-graphite, border-rule, bg-cobalt, text-crit ...).
+  Industrial instrument panel: cool paper, ink, one cobalt accent, signal colours only for severity.
+*/
+@theme {
+  --font-sans: "Archivo Variable", "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --color-paper: #f1f3f6;
+  --color-surface: #ffffff;
+  --color-ink: #16202b;
+  --color-graphite: #586472;
+  --color-rule: #d6dbe2;
+  --color-cobalt: #2747d0;
+  --color-cobalt-soft: #e6eafb;
+  --color-on-cobalt: #ffffff;
+  --color-crit: #b3372a;
+  --color-warn: #94600a;
+  --color-ok: #2a6f4e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #11161d;
+    --color-surface: #171e27;
+    --color-ink: #e4e8ee;
+    --color-graphite: #98a3b0;
+    --color-rule: #2a3440;
+    --color-cobalt: #8297ff;
+    --color-cobalt-soft: #1f2947;
+    --color-on-cobalt: #0e1420;
+    --color-crit: #ef7d6e;
+    --color-warn: #e2ad48;
+    --color-ok: #6cc497;
+  }
+}
+
+html {
+  background: var(--color-paper);
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Archivo's width axis carries the hierarchy: wide for figures and names, condensed for dense data. */
+.wd-wide {
+  font-stretch: 118%;
+  letter-spacing: -0.01em;
+}
+
+.wd-condensed {
+  font-stretch: 84%;
+}
+
+/* Engineering-drawing hatch, used for the money saved on the cost scale. */
+.hatch {
+  background-image: repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 5px);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-cobalt);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

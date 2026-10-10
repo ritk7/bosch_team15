@@ -1,0 +1,12 @@
+backend/.env
+backend/.cache/
+__pycache__/
+.pytest_cache/
+.venv/
+frontend/node_modules/
+frontend/dist/
+targets/voting/
+reports/
+docker-compose.fixes.yml
+.DS_Store
+.env
