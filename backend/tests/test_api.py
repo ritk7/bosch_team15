@@ -9,8 +9,8 @@ from app import config, main, state
 from app.runner import SimRunner
 from app.sim import Clock
 
-STATE_KEYS = {"runner", "services", "baseline", "phase", "current", "results", "campaign", "analysis", "fixes",
-              "applied_fixes", "compare", "cost", "error"}
+STATE_KEYS = {"target", "runner", "services", "baseline", "phase", "busy", "current", "results", "campaign", "analysis", "fixes",
+              "applied_fixes", "score_history", "twin", "compare", "cost", "error"}
 NODE_KEYS = {"id", "role", "image", "ports", "healthcheck", "restart", "stateful", "replicas", "depends_on", "fan_in",
              "spof", "notes"}
 OUTCOME_KEYS = {"sent", "acked", "stored", "lost", "errors", "error_pct", "p95_ms", "peak_p95_ms", "recovery_s",
@@ -35,7 +35,8 @@ def test_contract_shapes_and_a_full_run(tmp_path, monkeypatch):
         assert t["unit"]["plural"] == "votes" and len(t["services"]) == 5
 
         cat = client.get("/api/catalog").json()["experiments"]
-        assert cat[0]["id"] == "crash-redis" and cat == sorted(cat, key=lambda e: -e["risk_hint"])
+        assert {"crash-redis", "hang-redis", "compound-worker-hang-redis-crash"} <= {e["id"] for e in cat}
+        assert cat == sorted(cat, key=lambda e: -e["risk_hint"])
 
         assert client.post("/api/predict", json={"experiment_id": "nope"}).status_code == 404
         p = client.post("/api/predict", json={"experiment_id": "crash-redis"}).json()

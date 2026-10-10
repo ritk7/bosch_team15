@@ -9,7 +9,7 @@ import asyncio
 import secrets
 import time
 
-from . import agents, config, injectors, ledger, mapper, state
+from . import agents, analysis, config, fixes, injectors, ledger, mapper, planner, score, state
 from .guard import Guard
 from .probe import Probe, p95
 from .runner import differs
@@ -24,7 +24,8 @@ class Busy(RuntimeError):
 
 
 class Engine:
-    def __init__(self, target, runner, rate: float | None = None):
+    def __init__(self, target, runner, rate: float | None = None, persist: bool = True):
+        self.persist = persist  # the twin engine never touches the safety files
         self.target, self.runner = target, runner
         self.clock = runner.clock
         self.rate = rate or config.PROBE_RATE
@@ -38,6 +39,15 @@ class Engine:
         self.task: asyncio.Task | None = None
         self._probe: Probe | None = None
         self._services: list[dict] = []
+        self._cleanups: list = []
+        self._expected: dict | None = None  # service states at the first run: the healthy app
+        self.analysis: dict | None = None
+        self.fixes: dict | None = None
+        self.applied_fixes: list[str] = []
+        self.score_history: list[dict] = []
+        self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
+        self.compare: dict | None = None
+        self.twin: dict | None = None
         self.refresh_graph()
 
     # ---- graph ---------------------------------------------------------------------------------------------
@@ -45,7 +55,7 @@ class Engine:
         self.graph = self.target.graph()
         self.sync = mapper.sync_path(self.graph, self.target.entry)
         self.order = mapper.topo_order(self.graph)
-        self.catalog = injectors.catalog(self.graph, self.sync)
+        self.catalog = injectors.catalog(self.graph, self.sync, self.target.entry, self.target.extra_experiments(self.graph))
 
     def experiment(self, exp_id: str) -> dict:
         for e in self.catalog:
@@ -67,8 +77,41 @@ class Engine:
         self.error = f"Restored after an interrupted run ({fault.get('experiment_id')}): {', '.join(restored) or 'nothing to do'}"
         return restored
 
+    def load_snapshot(self, snap: dict | None) -> bool:
+        """After a restart of the tool, bring back runs, findings and score (same target and runner only)."""
+        if not snap or snap.get("target") != self.target.name or (snap.get("runner") or {}).get("kind") != self.runner.kind:
+            return False
+        self.results = snap.get("results") or []
+        self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
+        self.applied_fixes = snap.get("applied_fixes") or []
+        self.score_history = snap.get("score_history") or []
+        self.compare, self.twin = snap.get("compare"), snap.get("twin")
+        camp = snap.get("campaign") or {}
+        if camp.get("status") == "running":
+            camp["status"] = "stopped"
+        self.campaign = camp or self.campaign
+        if snap.get("baseline"):
+            self.baseline = {**snap["baseline"], "votes_sent": 0, "votes_stored": 0}
+        if self.results:
+            last = self.results[-1]
+            self.current = {"run_id": last["run_id"], "experiment": last["experiment"], "prediction": last["prediction"],
+                            "label": last["label"], "elapsed_s": last["timeline"][-1]["t"] if last["timeline"] else 0,
+                            "fault_duration_s": config.FAULT_S, "timeline": last["timeline"], "fleet": last["fleet"],
+                            "counters": {k: last["outcome"][k] for k in ("sent", "acked", "stored", "lost", "errors")}}
+            self.phase = "done"
+        return True
+
+    def save(self) -> None:
+        """Snapshot after analysis/fix changes too, not only after runs."""
+        if self.persist:
+            asyncio.get_event_loop().create_task(self._save())
+
+    async def _save(self) -> None:
+        state.save_snapshot(await self.state_json())
+
     # ---- baseline ------------------------------------------------------------------------------------------
     async def measure_baseline(self, duration_s: float = 5.0) -> dict:
+        await self.target.prepare(self.runner)
         probe = Probe(self.runner.client(), self.clock, self.rate, f"b{secrets.token_hex(3)}")
         probe.start()
         try:
@@ -118,7 +161,17 @@ class Engine:
             if self.baseline is None:
                 self.phase = "baseline"
                 await self.measure_baseline()
+            await self.runner.wait_ready(self.order)  # start every experiment from a healthy app
             original = await self.runner.snapshot()
+            if self._expected is None:
+                self._expected = original
+            down = [n for n in self.order if self._expected.get(n, {}).get("state") == "running"
+                    and original.get(n, {}).get("state") != "running"]
+            if down:  # something stayed down after an earlier run: never start a new fault on a broken app
+                await self.runner.restore_all(self._expected, self.order)
+                await self.runner.wait_ready(self.order)
+                original = await self.runner.snapshot()
+                self.error = f"Pre-flight restarted {', '.join(down)}, which was down before this run"
             probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id)
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
@@ -127,15 +180,18 @@ class Engine:
             await self._watch(probe, until=self.t0, t_begin=t_begin, fault_s=fault_s)
 
             self.phase = "inject"
-            state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
+            if self.persist:
+                state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
             self.guard.arm()  # never a fault without the guard
-            await injectors.apply(self.runner, exp)
+            self._cleanups = await injectors.apply(self.runner, exp, probe)
             self.phase = "observe"
             await self._watch(probe, until=self.t0 + fault_s, t_begin=t_begin, fault_s=fault_s, guarded=True)
 
             self.phase = "restore"
+            await self._run_cleanups()
             await self.runner.restore_all(original, self.order)
-            state.clear_active_fault()
+            if self.persist:
+                state.clear_active_fault()
             restored_at = self.clock.now()
             self.guard.disarm()
 
@@ -157,7 +213,23 @@ class Engine:
             await probe.close()
             await self._tick(probe, t_begin, fault_s)
 
+            # final safety check: a service can fail after the fault is gone (e.g. on reconnect). Watch a few seconds more,
+            # then restart anything that differs from before the fault, and report it.
+            notes: list[str] = []
+            broken: list[str] = []
+            for _ in range(10):
+                after = await self.runner.snapshot()
+                broken = [n for n in self.order if n in original and differs(after[n], original[n])]
+                if broken:
+                    break
+                await self.clock.sleep(0.5)
+            if broken:
+                await self.runner.restore_all(original, self.order)
+                notes.append(f"Secondary failure: {', '.join(broken)} failed after the fault was removed and stayed down "
+                             f"until Chaos Sentinel restarted it.")
+
             result = self._result(run_id, exp, label, probe, started_wall, restored_at)
+            result["notes"] = notes
             self.results.append(result)
             self.phase = "done"
             return result
@@ -170,13 +242,23 @@ class Engine:
             self.phase = "done"
             return None
         finally:
+            await self._run_cleanups()
             if probe:
                 await probe.close()
             if original is not None and restored_at is None:
                 await asyncio.shield(self._restore(original))
             self.guard.disarm()
             self._probe = None
-            state.save_snapshot(await self.state_json())
+            if self.persist:
+                state.save_snapshot(await self.state_json())
+
+    async def _run_cleanups(self) -> None:
+        cleanups, self._cleanups = self._cleanups, []
+        for c in cleanups:
+            try:
+                await c()
+            except Exception:  # a failed cleanup must not stop the restore
+                pass
 
     async def _restore(self, original: dict) -> list[str]:
         restored = await self.runner.restore_all(original, self.order)
@@ -239,6 +321,151 @@ class Engine:
                 "fleet": probe.fleet(), "started_at": started_wall, "duration_s": round(time.time() - started_wall, 1),
                 "label": label, "prediction_error": perr}
 
+    # ---- analysis, fixes, re-run ---------------------------------------------------------------------------
+    async def analyze(self) -> dict:
+        found, source, model = await analysis.findings(self.results, self.graph, self.target.unit, self.runner.kind)
+        sc = score.compute(self.results, self.graph)
+        self.analysis = {"findings": found, "score": sc, "decided_by": source, "model": model}
+        label = "after fix" if self.applied_fixes else "before fix"
+        self.score_history.append({"label": label, "value": sc["value"], "ts": time.time()})
+        self.save()
+        return self.analysis
+
+    async def recommend(self) -> dict:
+        if self.analysis is None:
+            await self.analyze()
+        assert self.analysis is not None
+        fx, source, model = await analysis.recommend(self.analysis["findings"], self.results, self.graph)
+        self.fixes = {"fixes": fx, "decided_by": source, "model": model}
+        self.save()
+        return self.fixes
+
+    async def apply_fixes(self, fix_ids: list[str]) -> dict:
+        """Engineer-approved: write the override and recreate only the services it changes."""
+        if self.busy:
+            raise Busy("An experiment is running")
+        chosen = [x for x in (self.fixes or {}).get("fixes", []) if x["id"] in fix_ids]
+        if not chosen:
+            raise ValueError("No such fixes. Run /api/fixes first.")
+        advice = [x["id"] for x in chosen if not x["auto_applicable"]]
+        if advice:
+            raise ValueError(f"{', '.join(advice)} are advice only and cannot be applied automatically")
+        restart = {svc: "unless-stopped" for x in chosen for svc in x.get("_services", [])}
+        overlay = fixes.write_overlay(self.target.overlay_file(), restart, {n["id"] for n in self.graph["nodes"]})
+        self.refresh_graph()
+        await self.runner.apply_overlay(sorted(restart))
+        self.applied_fixes = sorted(set(self.applied_fixes) | {x["id"] for x in chosen})
+        self.save()
+        return {"ok": True, "overlay": overlay,
+                "detail": f"restart: unless-stopped on {', '.join(sorted(restart))}; re-run the experiments to prove it"}
+
+    def start_rerun(self, exp_ids: list[str] | None = None) -> list[str]:
+        if self.busy:
+            raise Busy("An experiment is running")
+        if not exp_ids:
+            fx = [x for x in (self.fixes or {}).get("fixes", []) if x["id"] in self.applied_fixes]
+            fids = {fid for x in fx for fid in x.get("_findings", [x["finding_id"]])}
+            exp_ids = [f["experiment_id"] for f in (self.analysis or {}).get("findings", []) if f["id"] in fids] or \
+                [r["experiment"]["id"] for r in score.latest(self.results)]
+        exps = [self.experiment(i) for i in dict.fromkeys(exp_ids)]
+
+        async def sequence() -> None:
+            for exp in exps:
+                await self.predict(exp["id"])
+                await self.run(f"r{secrets.token_hex(3)}", exp, "after fix", config.FAULT_S)
+            await self.analyze()
+
+        self.task = asyncio.create_task(sequence())
+        return [e["id"] for e in exps]
+
+    # ---- campaign and twin -----------------------------------------------------------------------------------
+    def start_campaign(self, budget: int, strategy: str, seed: int = 7) -> None:
+        if self.busy:
+            raise Busy("An experiment is running")
+        budget = max(1, min(budget, len(self.catalog)))
+        self.campaign = {"status": "running", "strategy": strategy, "budget": budget, "picks": [],
+                         "remaining": [e["id"] for e in self.catalog]}
+
+        async def loop() -> None:
+            done: list[dict] = []
+            order = planner.random_order(self.catalog, seed) if strategy == "random" else []
+            try:
+                for i in range(budget):
+                    remaining = [e for e in self.catalog if e["id"] in self.campaign["remaining"]]
+                    if strategy == "random":
+                        p = {"experiment": order[i], "reason": f"random order (seed {seed})",
+                             "hypothesis": order[i]["description"], "decided_by": "rules", "model": "random"}
+                    else:
+                        p = await planner.pick(remaining, done, self.graph)
+                    exp = p["experiment"]
+                    self.campaign["picks"].append({"experiment_id": exp["id"], "reason": p["reason"],
+                                                   "hypothesis": p["hypothesis"], "decided_by": p["decided_by"],
+                                                   "model": p["model"], "order": i + 1})
+                    self.campaign["remaining"] = [x for x in self.campaign["remaining"] if x != exp["id"]]
+                    await self.predict(exp["id"])
+                    r = await self.run(f"r{secrets.token_hex(3)}", exp, f"campaign {strategy}", config.FAULT_S)
+                    if r:
+                        done.append(r)
+                self.campaign["status"] = "done"
+                await self.analyze()
+                await self.recommend()
+                await self.run_twin()
+            except asyncio.CancelledError:
+                self.campaign["status"] = "stopped"
+                raise
+
+        self.task = asyncio.create_task(loop())
+
+    async def stop_campaign(self) -> list[str]:
+        restored = await self.killswitch()
+        if self.campaign["status"] == "running":
+            self.campaign["status"] = "stopped"
+        return restored
+
+    async def run_twin(self, speed: float = 60.0) -> dict:
+        """Rehearse the whole catalog on the digital twin (simulation with the same graph and restart policies)."""
+        from .runner import SimRunner
+        from .sim import Clock
+
+        self.twin = {"status": "running", "rows": [], "ran_at": time.time()}
+        twin = Engine(self.target, SimRunner(self.target, Clock(speed)), rate=self.rate, persist=False)
+        twin.baseline = {"rps": self.rate, "error_pct": 0.0, "p95_ms": 10.0, "votes_sent": 0, "votes_stored": 0}
+        started = time.perf_counter()
+        fan = {n["id"]: n["fan_in"] for n in self.graph["nodes"]}
+        for exp in twin.catalog:
+            r = await twin.run(f"t{secrets.token_hex(2)}", exp, "twin", config.FAULT_S)
+            if not r:
+                continue
+            o = r["outcome"]
+            self.twin["rows"].append({"experiment_id": exp["id"], "title": exp["title"], "target": exp["target"],
+                                      "type": exp["type"], "penalty": round(score.penalty(r, fan.get(exp["target"], 0))[0], 1),
+                                      "error_pct": o["error_pct"], "lost": o["lost"], "recovery_s": o["recovery_s"],
+                                      "guard_tripped": o["guard_tripped"]})
+        self.twin["status"] = "done"
+        self.twin["seconds"] = round(time.perf_counter() - started, 1)
+        self.compare = planner.compare(twin.results, twin.catalog, self.graph)
+        self.save()
+        return self.twin
+
+    def start_twin(self) -> None:
+        if self.busy:
+            raise Busy("An experiment is running")
+        self.task = asyncio.create_task(self.run_twin())
+
+    async def reset_demo(self) -> str:
+        """Undo applied fixes and clear runs, so the next judge sees the original app."""
+        if self.busy:
+            raise Busy("An experiment is running")
+        fixes.clear_overlay(self.target.overlay_file())
+        self.refresh_graph()
+        await self.runner.apply_overlay([n["id"] for n in self.graph["nodes"]], reset=True)
+        self.results, self.analysis, self.fixes, self.applied_fixes = [], None, None, []
+        self.score_history, self.current, self.phase, self.error = [], None, "idle", None
+        self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
+        self.compare, self.twin = None, None
+        self.save()
+        return "Fixes removed and runs cleared"
+
     # ---- kill switch ---------------------------------------------------------------------------------------
     async def killswitch(self) -> list[str]:
         """Stop whatever is running and put every service back the way it was before the fault."""
@@ -264,17 +491,22 @@ class Engine:
                 seconds_left = self.current["fault_duration_s"] - self.current["elapsed_s"]
             cur = {**self.current, "guard": self.guard.view(seconds_left)}
         return {
+            "target": self.target.name,
             "runner": {"kind": self.runner.kind, "ready": ready, "detail": detail},
             "services": self._services,
             "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms")} if self.baseline else None,
             "phase": self.phase,
+            "busy": self.busy,
             "current": cur,
             "results": self.results,
-            "campaign": {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []},
-            "analysis": None,
-            "fixes": None,
-            "applied_fixes": [],
-            "compare": None,
+            "campaign": self.campaign,
+            "twin": self.twin,
+            "analysis": self.analysis,
+            "fixes": {**self.fixes, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")}
+                                              for x in self.fixes["fixes"]]} if self.fixes else None,
+            "applied_fixes": self.applied_fixes,
+            "score_history": self.score_history,
+            "compare": self.compare,
             "cost": ledger.summary(),
             "error": self.error,
         }

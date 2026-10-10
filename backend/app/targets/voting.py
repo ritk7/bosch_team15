@@ -10,28 +10,31 @@ EMBEDDED = Path(__file__).with_name("voting.compose.yml")
 
 
 class SimClient:
-    """The probe's view of the simulated app: POST a vote, then read which ids reached Postgres or sit in Redis."""
+    """The probe's view of a simulated app: send a unit, then read which ids were stored or are still queued."""
 
-    def __init__(self, app: SimVoting, clock: Clock, timeout_s: float = 5.0):
-        self.app, self.clock, self.timeout_s = app, clock, timeout_s
+    def __init__(self, app, clock: Clock, entry: str, timeout_s: float = 5.0):
+        self.app, self.clock, self.entry, self.timeout_s = app, clock, entry, timeout_s
 
     async def send(self, unit_id: str) -> tuple[int | None, float]:
         started = self.clock.now()
-        while True:
-            kind, status, latency = self.app.try_vote(unit_id, "ab"[int(unit_id.rsplit("-", 1)[-1]) % 2])
-            waited = self.clock.now() - started
-            if kind == "done":
-                await self.clock.sleep(latency)
-                return status, (waited + latency) * 1000
-            # a dependency is paused: the request hangs until it answers or a timeout fires
-            limit = self.timeout_s
-            if self.app.reach("vote", self.clock.now()) == "up":
-                limit = min(limit, 5.0)  # vote's own Redis socket_timeout -> HTTP 500
-                if waited >= limit:
-                    return 500, waited * 1000
-            elif waited >= limit:
-                return None, waited * 1000  # the probe gives up
-            await self.clock.sleep(0.05)
+        self.app.inflight += 1
+        try:
+            while True:
+                kind, status, latency = self.app.try_unit(unit_id, "ab"[int(unit_id.rsplit("-", 1)[-1]) % 2])
+                waited = self.clock.now() - started
+                if kind == "done":
+                    await self.clock.sleep(latency)
+                    return status, (waited + latency) * 1000
+                # a dependency hangs: the request waits until it answers or a timeout fires
+                if self.app.reach(self.entry, self.clock.now()) == "up":
+                    code, limit = self.app.hang_result
+                    if waited >= min(limit, self.timeout_s):
+                        return (code if limit <= self.timeout_s else None), waited * 1000
+                elif waited >= self.timeout_s:
+                    return None, waited * 1000  # the probe gives up
+                await self.clock.sleep(0.05)
+        finally:
+            self.app.inflight -= 1
 
     async def stored_ids(self, prefix: str) -> set[str] | None:
         return self.app.stored_ids(prefix)
@@ -42,7 +45,9 @@ class SimClient:
 
 class VotingTarget:
     name = "voting"
+    title = "voting app"
     entry = "vote"  # the probe sends units here
+    selftest_experiment = "crash-redis"
     unit = {"singular": "vote", "plural": "votes", "stored": "stored", "lost": "lost silently"}
     roles = {"vote": "web", "redis": "queue", "worker": "worker", "db": "database", "result": "web"}
     extra_edges = [
@@ -75,6 +80,29 @@ class VotingTarget:
     def graph(self) -> dict:
         return mapper.build_graph(self.compose_file(), roles=self.roles, extra_edges=self.extra_edges,
                                   notes=self.notes, overlay=self.overlay_file())
+
+    def extra_experiments(self, graph: dict) -> list[dict]:
+        if not {"worker", "redis"} <= {n["id"] for n in graph["nodes"]}:
+            return []
+        return [{"id": "compound-worker-hang-redis-crash", "type": "compound", "target": "redis",
+                 "title": "Pause worker, then crash redis",
+                 "description": "Freeze the worker so votes pile up in Redis, then kill Redis 4 s later. Votes were "
+                                "acknowledged with HTTP 200; do they survive?",
+                 "params": {"steps": "pause:worker,crash:redis", "delay_s": 4}, "risk_hint": 1.0}]
+
+    def make_sim(self, clock: Clock, policies: dict) -> SimVoting:
+        return SimVoting(clock, policies)
+
+    def sim_client(self, app, clock: Clock) -> SimClient:
+        return SimClient(app, clock, self.entry)
+
+    def docker_client(self, runner):
+        from ..docker_runner import DockerClient
+
+        return DockerClient(runner)
+
+    async def prepare(self, runner) -> None:
+        return None
 
     def assumptions(self, rate: float) -> list[str]:
         return [

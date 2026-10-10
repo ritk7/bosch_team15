@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, ledger, llm, state, targets
+from . import config, ledger, llm, report, state, targets
 from .campaign import Busy, Engine
 from .runner import make_runner
 
@@ -21,6 +22,7 @@ async def lifespan(_app: FastAPI):
     target = targets.load()
     engine = Engine(target, make_runner(target))
     await engine.recover_on_startup()  # undo a fault left behind by a crash of this process
+    engine.load_snapshot(state.load_snapshot(target.name))  # keep the demo's runs and findings across a restart
     yield
     if engine.busy:
         await engine.killswitch()
@@ -65,6 +67,26 @@ async def target() -> dict:
         compose_name = str(compose)
     return {"name": e.target.name, "compose_file": compose_name, "graph": e.graph,
             "assumptions": e.target.assumptions(e.rate), "services": await e.runner.services(), "unit": e.target.unit}
+
+
+@app.get("/api/targets")
+def list_targets() -> dict:
+    return {"targets": [{"name": n, "title": cls.title} for n, cls in targets.TARGETS.items()],
+            "current": eng().target.name}
+
+
+@app.post("/api/target/select")
+async def select_target(body: dict = Body(...)) -> dict:
+    """Switch the app under test. In Docker mode the other target's containers must be started separately."""
+    global engine
+    idle()
+    name = str(body.get("name"))
+    if name not in targets.TARGETS:
+        raise HTTPException(404, f"Unknown target '{name}'")
+    target = targets.load(name)
+    engine = Engine(target, make_runner(target))
+    engine.load_snapshot(state.load_snapshot(target.name))
+    return {"ok": True, "detail": f"Now testing the {target.title} ({engine.runner.kind})"}
 
 
 @app.post("/api/target/start")
@@ -119,14 +141,99 @@ async def killswitch() -> dict:
     return {"ok": True, "restored": await eng().killswitch()}
 
 
+@app.post("/api/campaign/start")
+async def campaign_start(body: dict = Body(...)) -> dict:
+    strategy = str(body.get("strategy") or "ai")
+    if strategy not in ("ai", "random"):
+        raise HTTPException(422, "strategy must be ai or random")
+    try:
+        idle().start_campaign(int(body.get("budget") or 5), strategy, int(body.get("seed") or 7))
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
+    return {"ok": True}
+
+
+@app.post("/api/campaign/stop")
+async def campaign_stop() -> dict:
+    return {"ok": True, "restored": await eng().stop_campaign()}
+
+
+@app.post("/api/twin")
+async def twin() -> dict:
+    """Rehearse every experiment on the digital twin in seconds; results land in /state.twin and /state.compare."""
+    try:
+        idle().start_twin()
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
+    return {"ok": True}
+
+
+@app.post("/api/analyze")
+async def analyze() -> dict:
+    e = idle()
+    if not e.results:
+        raise HTTPException(409, "Run at least one experiment first")
+    return await e.analyze()
+
+
+@app.post("/api/fixes")
+async def get_fixes() -> dict:
+    e = idle()
+    if not e.results:
+        raise HTTPException(409, "Run at least one experiment first")
+    fx = await e.recommend()
+    return {**fx, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")} for x in fx["fixes"]]}
+
+
+@app.post("/api/apply-fixes")
+async def apply_fixes(body: dict = Body(...)) -> dict:
+    try:
+        return await idle().apply_fixes([str(i) for i in body.get("fix_ids") or []])
+    except ValueError as err:
+        raise HTTPException(422, str(err)) from None
+
+
+@app.post("/api/rerun")
+async def rerun(body: dict = Body(default={})) -> dict:
+    try:
+        return {"ok": True, "experiments": idle().start_rerun(body.get("experiment_ids"))}
+    except KeyError as err:
+        raise HTTPException(404, f"Unknown experiment {err}") from None
+
+
+@app.post("/api/reset")
+async def reset_demo() -> dict:
+    return {"ok": True, "detail": await idle().reset_demo()}
+
+
 @app.get("/api/state")
 async def get_state() -> dict:
     return await eng().state_json()
 
 
+@app.get("/api/report")
+def get_report() -> dict:
+    e = eng()
+    return {"markdown": report.findings_report(e), "score": e.analysis["score"] if e.analysis else None,
+            "score_history": e.score_history}
+
+
+@app.get("/api/report.md")
+def report_md() -> PlainTextResponse:
+    e = eng()
+    return PlainTextResponse(report.findings_report(e), media_type="text/markdown",
+                             headers={"Content-Disposition": f'attachment; filename="{e.target.name}-findings-report.md"'})
+
+
+@app.get("/api/architecture.md")
+def architecture_md() -> PlainTextResponse:
+    return PlainTextResponse(report.architecture(eng()), media_type="text/markdown",
+                             headers={"Content-Disposition": 'attachment; filename="architecture.md"'})
+
+
 @app.get("/api/snapshot")
 async def snapshot() -> dict:
-    return state.load_snapshot() or await eng().state_json()
+    return state.load_snapshot(eng().target.name) or await eng().state_json()
 
 
 @app.get("/api/ledger")

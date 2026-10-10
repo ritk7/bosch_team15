@@ -3,10 +3,16 @@ import { CostGauge } from "./components/CostGauge";
 import { TierStatus } from "./components/TierStatus";
 import { api, type Experiment, type Health, type State, type Target } from "./lib/api";
 import { LedgerView } from "./views/LedgerView";
+import { Campaign } from "./views/Campaign";
+import { Findings } from "./views/Findings";
+import { Report } from "./views/Report";
 import { Live } from "./views/Live";
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "campaign", label: "Campaign" },
+  { id: "findings", label: "Findings" },
+  { id: "report", label: "Report" },
   { id: "cost", label: "Cost" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -18,6 +24,26 @@ export default function App() {
   const [target, setTarget] = useState<Target | null>(null);
   const [catalog, setCatalog] = useState<Experiment[]>([]);
   const [tab, setTab] = useState<Tab>("live");
+  const [targets, setTargets] = useState<{ name: string; title: string }[]>([]);
+  const [switching, setSwitching] = useState(false);
+
+  const loadTarget = useCallback(() => {
+    api.target().then(setTarget).catch(() => setOffline(true));
+    api.catalog().then((c) => setCatalog(c.experiments)).catch(() => undefined);
+    api.targets().then((t) => setTargets(t.targets)).catch(() => undefined);
+  }, []);
+
+  async function switchTarget(name: string) {
+    setSwitching(true);
+    try {
+      await api.selectTarget(name);
+      loadTarget();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSwitching(false);
+    }
+  }
 
   const poll = useCallback(() => {
     api
@@ -33,8 +59,7 @@ export default function App() {
     document.title = "Chaos Sentinel";
     const check = () => api.health().then(setHealth).catch(() => setOffline(true));
     check();
-    api.target().then(setTarget).catch(() => setOffline(true));
-    api.catalog().then((c) => setCatalog(c.experiments)).catch(() => undefined);
+    loadTarget();
     poll();
     const fast = setInterval(poll, 500);
     const slow = setInterval(check, 15000);
@@ -42,7 +67,7 @@ export default function App() {
       clearInterval(fast);
       clearInterval(slow);
     };
-  }, [poll]);
+  }, [poll, loadTarget]);
 
   const runner = state?.runner ?? health?.runner;
 
@@ -61,6 +86,21 @@ export default function App() {
             >
               {runner.kind === "sim" ? "Simulation" : "Docker"}
             </span>
+          )}
+          {targets.length > 1 && target && (
+            <label className="flex items-center gap-2 text-sm text-graphite">
+              <span className="sr-only sm:not-sr-only">Testing</span>
+              <select
+                value={target.name}
+                disabled={switching || (state != null && !["idle", "done"].includes(state.phase))}
+                onChange={(e) => switchTarget(e.target.value)}
+                className="border border-rule bg-surface px-2 py-1 font-semibold text-ink"
+              >
+                {targets.map((t) => (
+                  <option key={t.name} value={t.name}>{t.title}</option>
+                ))}
+              </select>
+            </label>
           )}
           <nav aria-label="Views" className="flex gap-1">
             {TABS.map((t) => (
@@ -87,6 +127,9 @@ export default function App() {
           </p>
         )}
         {tab === "live" && state && target && <Live state={state} target={target} catalog={catalog} onChange={poll} />}
+        {tab === "findings" && state && target && <Findings state={state} target={target} onChange={poll} />}
+        {tab === "campaign" && state && target && <Campaign state={state} target={target} catalog={catalog} onChange={poll} />}
+        {tab === "report" && state && <Report version={`${state.results.length}-${state.analysis?.score.value ?? ""}-${target?.name}`} />}
         {tab === "cost" && (
           <div className="space-y-10">
             {state && <CostGauge cost={state.cost} runKey={String(state.results.length)} />}

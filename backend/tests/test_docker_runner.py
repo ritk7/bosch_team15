@@ -17,6 +17,8 @@ class FakeExec:
 
     async def __call__(self, args: list[str], timeout: float = 60.0):
         self.calls.append(args)
+        if args[1:3] == ["inspect", "-f"]:
+            return 0, "4242", ""
         if "ps" in args:
             return 0, "\n".join(json.dumps(r) for r in self.ps_rows), ""
         return 0, "", ""
@@ -45,9 +47,12 @@ def test_commands_are_scoped_to_the_project():
     asyncio.run(r.pause("worker"))
     asyncio.run(r.unpause("worker"))
     prefix = ["docker", "compose", "-p", "voting", "-f", str(r.compose)]
-    tails = [c[len(prefix):] for c in fake.calls]
-    assert all(c[: len(prefix)] == prefix for c in fake.calls)
-    assert tails == [["kill", "-s", "SIGKILL", "redis"], ["start", "redis"], ["pause", "worker"], ["unpause", "worker"]]
+    compose = [c[len(prefix):] for c in fake.calls if c[:2] == ["docker", "compose"]]
+    assert all(c[: len(prefix)] == prefix for c in fake.calls if c[:2] == ["docker", "compose"])
+    actions = [c for c in compose if c[0] != "ps"]
+    assert actions == [["start", "redis"], ["pause", "worker"], ["unpause", "worker"]]
+    # crash = SIGKILL of exactly this container's process (pid from inspect), so a restart policy can still fire
+    assert ["docker", "run", "--rm", "--privileged", "--pid=host", "alpine:3.20", "kill", "-9", "4242"] in fake.calls
 
 
 def test_business_check_commands():

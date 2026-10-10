@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from . import config
-from .sim import WARMUP_S, Clock, SimVoting
+from .sim import Clock
 
 
 class Runner(Protocol):
@@ -47,14 +47,14 @@ class SimRunner:
     def reset(self) -> None:
         graph = self.target.graph()
         self.allowed = {n["id"] for n in graph["nodes"]}
-        self.app = SimVoting(self.clock, {n["id"]: n["restart"] for n in graph["nodes"]})
+        self.app = self.target.make_sim(self.clock, {n["id"]: n["restart"] for n in graph["nodes"]})
 
     def _check(self, svc: str) -> None:
         if svc not in self.allowed:
             raise ValueError(f"'{svc}' is not a service of the target compose project")
 
     async def ready(self) -> tuple[bool, str]:
-        return True, "Simulation of the voting app (no Docker needed)"
+        return True, f"Simulation of the {self.target.title} (no Docker needed)"
 
     async def services(self) -> list[dict]:
         self.app.advance()
@@ -125,11 +125,22 @@ class SimRunner:
                 await self.start(name)
             restored.append(name)
             # wait for this service before starting the ones that need it (as compose does with service_healthy)
-            for _ in range(int(WARMUP_S.get(name, 1.0) / 0.1) + 20):
+            for _ in range(int(self.app.warmup.get(name, 1.0) / 0.1) + 20):
                 if want["state"] != "running" or self.app.is_up(name):
                     break
                 await self.clock.sleep(0.1)
         return restored
+
+    async def wait_ready(self, order: list[str], max_s: float = 90.0) -> bool:
+        """Pre-flight: every running service answers before a new experiment starts."""
+        waited = 0.0
+        while waited < max_s:
+            snap = await self.snapshot()
+            if all(self.app.is_up(n) for n in order if n in snap and snap[n]["state"] == "running"):
+                return True
+            await self.clock.sleep(0.25)
+            waited += 0.25
+        return False
 
     async def up(self) -> str:
         self.reset()
@@ -140,10 +151,18 @@ class SimRunner:
             self.app.stop(name)
         return "Simulation stopped: all services down"
 
-    def client(self):
-        from .targets.voting import SimClient
+    async def apply_overlay(self, services: list[str], reset: bool = False) -> None:
+        """The overlay changed restart policies: give the simulated containers the policies from the merged graph."""
+        if reset:
+            self.reset()
+            return
+        policies = {n["id"]: n["restart"] for n in self.target.graph()["nodes"]}
+        for name in services:
+            if name in self.app.svcs:
+                self.app.svcs[name].restart_policy = policies.get(name)
 
-        return SimClient(self.app, self.clock)
+    def client(self):
+        return self.target.sim_client(self.app, self.clock)
 
 
 def docker_available(target) -> bool:
@@ -156,7 +175,12 @@ def docker_available(target) -> bool:
     if not exe or not (target.target_dir / "docker-compose.yml").exists():
         return False
     try:
-        return subprocess.run([exe, "info"], capture_output=True, timeout=8).returncode == 0
+        if subprocess.run([exe, "info"], capture_output=True, timeout=8).returncode != 0:
+            return False
+        # only when this target's containers are actually up (run one target at a time; both use port 8080)
+        ps = subprocess.run([exe, "compose", "-p", target.target_dir.name, "-f", str(target.compose_file()), "ps", "-q"],
+                            capture_output=True, text=True, timeout=15)
+        return ps.returncode == 0 and bool(ps.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
         return False
 

@@ -1,0 +1,52 @@
+# Eclipse hawkBit monolith with MySQL and RabbitMQ, merged from github.com/eclipse-hawkbit/hawkbit
+# docker/mysql/docker-compose-monolith-mysql.yml + docker-compose-deps-mysql.yml (EPL-2.0, Bosch Software Innovations GmbH and others).
+# hawkBit's image is amd64 only; on Apple Silicon it runs under emulation. Needs ~4 GB for Docker. Uses host port 8080.
+services:
+  hawkbit:
+    image: "hawkbit/hawkbit-update-server:latest"
+    environment:
+      - 'PROFILES=mysql'
+      - 'SPRING_DATASOURCE_URL=jdbc:mariadb://mysql:3306/hawkbit'
+      - 'SPRING_DATASOURCE_USERNAME=root'
+      - 'SPRING_RABBITMQ_HOST=rabbitmq'
+      - 'SPRING_RABBITMQ_USERNAME=guest'
+      - 'SPRING_RABBITMQ_PASSWORD=guest'
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - artifactrepo:/app/artifactrepo
+
+  mysql:
+    image: "mysql:8.0"
+    environment:
+      MYSQL_DATABASE: "hawkbit"
+      MYSQL_ALLOW_EMPTY_PASSWORD: "true"
+    restart: always
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      timeout: 20s
+      retries: 10
+
+  rabbitmq:
+    image: "rabbitmq:4-management-alpine"
+    hostname: "rabbitmq"
+    environment:
+      RABBITMQ_DEFAULT_VHOST: "/"
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  artifactrepo:
+    driver: local

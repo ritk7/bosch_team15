@@ -33,7 +33,7 @@ export interface TierStatus {
 
 export type RunnerKind = "docker" | "sim";
 export type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
-export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "latency";
+export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "latency";
 export type Confidence = "low" | "medium" | "high";
 export type Phase = "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
 export type VoteState = "ok" | "queued" | "error" | "lost" | "pending";
@@ -122,6 +122,7 @@ export interface ExperimentResult {
   duration_s: number;
   label: string;
   prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+  notes?: string[];
 }
 
 export interface Pick {
@@ -222,6 +223,7 @@ export interface State {
   services: ServiceStatus[];
   baseline: Baseline | null;
   phase: Phase;
+  busy: boolean;
   current: Current | null;
   results: ExperimentResult[];
   campaign: {
@@ -234,9 +236,23 @@ export interface State {
   analysis: null | { findings: Finding[]; score: Score; decided_by: Source; model: string };
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
+  score_history: { label: string; value: number; ts: number }[];
+  twin: null | { status: "running" | "done"; rows: TwinRow[]; ran_at: number; seconds?: number };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;
   error: string | null;
+}
+
+export interface TwinRow {
+  experiment_id: string;
+  title: string;
+  target: string;
+  type: FailureType;
+  penalty: number;
+  error_pct: number;
+  lost: number;
+  recovery_s: number | null;
+  guard_tripped: boolean;
 }
 
 export interface Health {
@@ -289,6 +305,8 @@ const post = <T>(path: string, body?: unknown) =>
 export const api = {
   health: () => request<Health>("/api/health"),
   target: () => request<Target>("/api/target"),
+  targets: () => request<{ targets: { name: string; title: string }[]; current: string }>("/api/targets"),
+  selectTarget: (name: string) => post<{ ok: boolean; detail: string }>("/api/target/select", { name }),
   startTarget: () => post<{ ok: boolean; detail: string }>("/api/target/start"),
   stopTarget: () => post<{ ok: boolean; detail: string }>("/api/target/stop"),
   catalog: () => request<{ experiments: Experiment[] }>("/api/catalog"),
@@ -301,6 +319,16 @@ export const api = {
     post<{ run_id: string }>("/api/run", { experiment_id, label, fault_duration_s }),
   killswitch: () => post<{ ok: boolean; restored: string[] }>("/api/killswitch"),
   state: () => request<State>("/api/state"),
+  analyze: () => post<{ findings: Finding[]; score: Score; decided_by: Source; model: string }>("/api/analyze"),
+  fixes: () => post<{ fixes: Fix[]; decided_by: Source; model: string }>("/api/fixes"),
+  applyFixes: (fix_ids: string[]) => post<{ ok: boolean; overlay: string; detail: string }>("/api/apply-fixes", { fix_ids }),
+  rerun: (experiment_ids?: string[]) => post<{ ok: boolean; experiments: string[] }>("/api/rerun", { experiment_ids }),
+  reset: () => post<{ ok: boolean; detail: string }>("/api/reset"),
+  startCampaign: (budget: number, strategy: "ai" | "random", seed?: number) =>
+    post<{ ok: boolean }>("/api/campaign/start", { budget, strategy, seed }),
+  stopCampaign: () => post<{ ok: boolean; restored: string[] }>("/api/campaign/stop"),
+  twin: () => post<{ ok: boolean }>("/api/twin"),
+  report: () => request<{ markdown: string; score: Score | null; score_history: { label: string; value: number; ts: number }[] }>("/api/report"),
   snapshot: () => request<State>("/api/snapshot"),
   ledger: () => request<{ summary: CostSummary; entries: LedgerEntry[] }>("/api/ledger"),
   resetLedger: () => request<{ ok: boolean }>("/api/ledger/reset", { method: "POST" }),

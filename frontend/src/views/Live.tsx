@@ -35,9 +35,11 @@ export function Live({ state, target, catalog, onChange }: Props) {
   const [pending, setPending] = useState<Prediction | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [guess, setGuess] = useState<{ err: number; lost: number }>({ err: 50, lost: 0 });
+  const [guesses, setGuesses] = useState<Record<string, { err: number; lost: number }>>({});
 
   const cur = state.current;
-  const running = !["idle", "done"].includes(state.phase);
+  const running = state.busy || !["idle", "done"].includes(state.phase);
   const unit = target.unit;
   const result: ExperimentResult | undefined =
     state.phase === "done" && cur ? state.results.find((r) => r.run_id === cur.run_id) : undefined;
@@ -62,7 +64,8 @@ export function Live({ state, target, catalog, onChange }: Props) {
   const confirm = () =>
     pending &&
     act("run", async () => {
-      await api.run(pending.experiment_id);
+      const { run_id } = await api.run(pending.experiment_id);
+      setGuesses((g) => ({ ...g, [run_id]: guess }));
       setPending(null);
     });
   const kill = () => act("kill", () => api.killswitch());
@@ -110,7 +113,7 @@ export function Live({ state, target, catalog, onChange }: Props) {
         {/* choose */}
         <div className="space-y-6">
           <section aria-labelledby="map-h" className="border border-rule bg-surface p-4">
-            <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map</h2>
+            <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map: {target.name === "hawkbit" ? "Bosch hawkBit" : "voting app"}</h2>
             <p className="mt-1 mb-3 text-[0.8rem] text-graphite">
               {target.graph.nodes.length} services read from <span className="wd-condensed">{target.compose_file}</span>, plus the data flows the compose file does not declare.
             </p>
@@ -119,6 +122,7 @@ export function Live({ state, target, catalog, onChange }: Props) {
               services={state.services}
               selected={selected}
               target={running ? (cur?.experiment.target ?? null) : null}
+              flowing={running || (cur?.counters.sent ?? 0) > 0}
               disabled={running}
               onSelect={(id) => {
                 setSelected(id);
@@ -158,7 +162,6 @@ export function Live({ state, target, catalog, onChange }: Props) {
                       <span className="mt-0.5 block text-[0.8rem] text-graphite">{exp.description}</span>
                     </button>
                   ))}
-                  <p className="text-xs text-graphite">Slowdowns, network cuts and compound failures arrive in the next milestone.</p>
                 </div>
               </>
             )}
@@ -228,6 +231,17 @@ export function Live({ state, target, catalog, onChange }: Props) {
             {pending && !running && (
               <>
                 <PredictionCard prediction={pending} unit={unit} />
+                <fieldset className="mt-4 border-t border-rule pt-3">
+                  <legend className="text-[0.8rem] font-semibold">Your guess (optional): human against AI</legend>
+                  <div className="mt-2 grid grid-cols-2 gap-3 text-[0.8rem]">
+                    <label className="text-graphite">Errors <span className="font-semibold text-ink tabular-nums">{guess.err}%</span>
+                      <input type="range" min={0} max={100} step={5} value={guess.err} onChange={(e) => setGuess({ ...guess, err: Number(e.target.value) })} className="mt-1 w-full accent-[var(--color-cobalt)]" />
+                    </label>
+                    <label className="text-graphite">{cap(unit.plural)} lost
+                      <input type="number" min={0} max={500} value={guess.lost} onChange={(e) => setGuess({ ...guess, lost: Math.max(0, Number(e.target.value)) })} className="mt-1 w-full border border-rule bg-surface px-2 py-1 text-ink tabular-nums" />
+                    </label>
+                  </div>
+                </fieldset>
                 <div className="mt-4 flex gap-3">
                   <button type="button" onClick={confirm} disabled={busyAction !== null}
                     className="flex-1 bg-cobalt px-4 py-2.5 font-semibold text-on-cobalt hover:opacity-90 disabled:opacity-60">
@@ -239,7 +253,7 @@ export function Live({ state, target, catalog, onChange }: Props) {
             )}
             {!pending && cur && !result && (cur.prediction ? <PredictionCard prediction={cur.prediction} unit={unit} /> :
               <p className="text-sm text-graphite">This run has no prediction.</p>)}
-            {!pending && result && <Reveal result={result} unit={unit} />}
+            {!pending && result && <Reveal result={result} unit={unit} human={guesses[result.run_id]} />}
           </section>
 
           <GuardCard guard={cur?.guard ?? null} last={cur?.timeline[cur.timeline.length - 1]} wallS={Math.max(0, cur?.elapsed_s ?? 0)}

@@ -99,7 +99,7 @@ def tier(name: str) -> Tier:
 REPO = ROOT.parent
 RUNNER = env("RUNNER", "auto")  # docker | sim | auto
 TARGET = env("TARGET", "voting")
-TARGET_DIR = (REPO / env("TARGET_DIR", "targets/voting")).resolve()
+TARGET_DIR = (REPO / env("TARGET_DIR", f"targets/{TARGET}")).resolve()
 # 5 units/s, not 10: the voting worker pops one unit per ~100 ms (worker/Program.cs, Thread.Sleep(100)), so at 10/s its
 # queue can never drain after a fault. 5/s leaves it headroom to catch up, which is what recovery measures.
 PROBE_RATE = float(env("PROBE_RATE", "5"))

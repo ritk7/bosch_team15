@@ -117,6 +117,8 @@ async def complete(
     run_id: str = "",
 ) -> LLMResult:
     hit = cache.get(task, system, prompt, semantic=semantic_cache)
+    if hit and accept is not None and not accept(hit[0]):
+        hit = None  # a cached answer must pass today's check too
     if hit:
         text, kind, tin, tout = hit
         ledger.record(task=task, source="cache", model=f"{kind} cache hit", tokens_in=tin, tokens_out=tout,

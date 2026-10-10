@@ -34,7 +34,7 @@ export function PredictionCard({ prediction, unit }: { prediction: Prediction; u
   );
 }
 
-export function Reveal({ result, unit }: { result: ExperimentResult; unit: Unit }) {
+export function Reveal({ result, unit, human }: { result: ExperimentResult; unit: Unit; human?: { err: number; lost: number } }) {
   const o = result.outcome;
   const p = result.prediction;
   const rows: { k: string; pred: string; act: string; diff: string | null; bad: boolean }[] = [
@@ -68,11 +68,25 @@ export function Reveal({ result, unit }: { result: ExperimentResult; unit: Unit 
           ))}
         </tbody>
       </table>
+      {human && p && (() => {
+        const humanOff = Math.abs(human.err - o.error_pct) + Math.abs(human.lost - o.lost) * 2;
+        const aiOff = Math.abs(p.expected_error_pct - o.error_pct) + Math.abs(p.expected_votes_lost - o.lost) * 2;
+        return (
+          <p className="mt-3 border-l-2 border-cobalt pl-3 text-sm">
+            Your guess: {human.err}% errors, {human.lost} lost.{" "}
+            <span className="font-semibold">{humanOff < aiOff ? "You beat the AI this time." : humanOff === aiOff ? "A draw with the AI." : "The AI was closer."}</span>{" "}
+            <span className="text-graphite">(off by {Math.round(humanOff)} against the AI's {Math.round(aiOff)}; lost units count double)</span>
+          </p>
+        );
+      })()}
       <p className="mt-3 text-[0.8rem] text-graphite">
         {o.sent} {unit.plural} sent, {o.acked} acknowledged, {o.stored} {unit.stored}
         {o.lost ? `, ${o.lost} ${unit.lost}` : ""}. Peak p95 {Math.round(o.peak_p95_ms)} ms.{" "}
         {o.guard_tripped ? `The guard stopped the fault: ${o.guard_reason?.toLowerCase()}.` : "The guard did not need to step in."}
       </p>
+      {(result.notes ?? []).map((n) => (
+        <p key={n} className="mt-2 border-l-2 border-warn pl-3 text-[0.8rem] text-warn">{n}</p>
+      ))}
     </div>
   );
 }

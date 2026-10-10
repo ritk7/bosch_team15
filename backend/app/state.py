@@ -31,12 +31,16 @@ def clear_active_fault() -> None:
     ACTIVE_FAULT.unlink(missing_ok=True)
 
 
+def _snap_path(target: str | None) -> Path:
+    return LAST_STATE if not target else LAST_STATE.with_name(f"{LAST_STATE.stem}_{target}.json")
+
+
 def save_snapshot(data: dict) -> None:
-    _write(LAST_STATE, data)
+    _write(_snap_path(data.get("target")), data)
 
 
-def load_snapshot() -> dict | None:
+def load_snapshot(target: str | None = None) -> dict | None:
     try:
-        return json.loads(LAST_STATE.read_text(encoding="utf-8"))
+        return json.loads(_snap_path(target).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None

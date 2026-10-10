@@ -15,6 +15,7 @@ import httpx
 
 from .sim import Clock
 
+HELPER_IMAGE = "alpine:3.20"  # only used to deliver SIGKILL to one process of the target project
 COMPOSE_STATE = {"running": "running", "exited": "stopped", "dead": "stopped", "created": "stopped",
                  "paused": "paused", "restarting": "restarting", "removing": "stopped"}
 
@@ -180,7 +181,19 @@ class DockerRunner:
                     "connected": self.connected[s], "cpus": self.cpus[s]} for s in self.allowed}
 
     async def crash(self, svc: str) -> None:
+        """SIGKILL the container's main process, as an OOM kill or segfault would (exit 137).
+        `docker kill` marks a container as manually stopped, so a restart policy would never fire, and SIGTERM lets
+        Redis save its data first (both measured). So a short-lived helper in the host PID namespace sends SIGKILL to
+        exactly this container's process id (read from docker inspect). Falls back to `docker compose kill`."""
         self._check(svc)
+        container = await self._container(svc)
+        code, out, _ = await self.exe([self.docker, "inspect", "-f", "{{.State.Pid}}", container], 10.0)
+        pid = out.strip()
+        if code == 0 and pid.isdigit() and int(pid) > 1:
+            code, _, _ = await self.exe([self.docker, "run", "--rm", "--privileged", "--pid=host", HELPER_IMAGE,
+                                         "kill", "-9", pid], 30.0)
+            if code == 0:
+                return
         await self._compose("kill", "-s", "SIGKILL", svc)
 
     async def start(self, svc: str) -> None:
@@ -227,10 +240,13 @@ class DockerRunner:
 
     async def _wait_up(self, svc: str, max_s: float = 25.0) -> None:
         """Wait until the service runs, and until it is healthy when other services depend on it."""
-        waited = 0.0
+        waited, exited = 0.0, 0
         while waited < max_s:
             row = next((r for r in await self._ps() if r.get("Service") == svc), {})
             running = row.get("State") == "running"
+            exited = exited + 1 if row.get("State") in ("exited", "dead") else 0
+            if exited >= 3:  # it died again on its own; the final safety check restarts and reports it
+                return
             healthy = row.get("Health") in ("", None, "healthy") or svc not in self.depended_on
             if running and healthy:
                 return
@@ -261,6 +277,19 @@ class DockerRunner:
                 await self._wait_up(name)
         return restored
 
+    async def wait_ready(self, order: list[str], max_s: float = 90.0) -> bool:
+        for svc in order:
+            await self._wait_up(svc, max_s)
+        return True
+
+    async def apply_overlay(self, services: list[str], reset: bool = False) -> None:
+        """Recreate the services whose compose settings changed (the override file is included by compose_args)."""
+        for svc in services:
+            self._check(svc)
+        await self._compose("up", "-d", "--no-build", *services, timeout=180)
+        for svc in services:
+            await self._wait_up(svc, 60)
+
     async def up(self) -> str:
         await self._compose("up", "-d", "--build", timeout=900)
         return f"docker compose up -d done for project '{self.project}'"
@@ -269,7 +298,7 @@ class DockerRunner:
         await self._compose("stop", timeout=120)
         return f"docker compose stop done for project '{self.project}'"
 
-    def client(self) -> DockerClient:
+    def client(self):
         if self._client is None:
-            self._client = DockerClient(self)
+            self._client = self.target.docker_client(self)
         return self._client

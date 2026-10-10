@@ -10,7 +10,11 @@ Behaviour comes from the app's source code (github.com/dockersamples/example-vot
   Redis keeps the queue in memory only.
 Measured on Docker (selftest, 2026-10-10), and the simulation follows the measurement where it differs from the source:
 - crash redis: vote requests hang (no fast 500; the name "redis" stops resolving), so p95 trips the guard after ~4 s;
-  the worker did not exit, it reconnected once Redis was back. Other behaviour above is still unverified.
+  the worker did not exit, it reconnected once Redis was back.
+- pause worker, then crash redis: acknowledged votes queued in Redis are lost (24 of 224), and the worker exits when it
+  is unfrozen and finds its Redis connection broken; with no restart policy it stays down.
+- crash redis with `restart: unless-stopped`: Redis is back within ~1 s, the worker's connection breaks and it exits
+  (9 votes lost). Other behaviour is unverified.
 """
 from __future__ import annotations
 
@@ -54,6 +58,7 @@ class Svc:
     started_at: float = -100.0
     restart_at: float | None = None
     backoff: float = 0.1
+    died_at: float | None = None
 
 
 @dataclass
@@ -63,6 +68,9 @@ class SimVoting:
     seed: int = 7
 
     def __post_init__(self) -> None:
+        self.warmup = WARMUP_S
+        self.hang_result: tuple[int | None, float] = (500, REDIS_TIMEOUT_S)  # vote's socket_timeout -> HTTP 500
+        self.inflight = 0  # concurrent probe requests, for traffic spikes
         self.svcs = {n: Svc(n, self.policies.get(n)) for n in WARMUP_S}
         self.queue: deque[tuple[str, str]] = deque()
         self.db: dict[str, str] = {}
@@ -73,6 +81,7 @@ class SimVoting:
         self._worker_inflight: tuple[str, str] | None = None
         self._redis_hang: float | None = None
         self._db_hang: float | None = None
+        self._worker_doomed = False
 
     # ---- state helpers -------------------------------------------------------------------------------------
     def reach(self, name: str, t: float) -> str:
@@ -90,8 +99,11 @@ class SimVoting:
 
     def _start(self, name: str, t: float) -> None:
         s = self.svcs[name]
+        if name == "redis" and s.died_at is not None and t - s.died_at < 3 and self.svcs["worker"].state == "running":
+            self._worker_doomed = True  # measured: Redis back within ~1 s breaks the worker's connection and it exits
         s.state, s.started_at, s.restart_at = "running", t, None
         if name == "worker":
+            self._worker_doomed = False
             self._worker_ready, self._worker_next = False, t + WARMUP_S["worker"]
             self._redis_hang = self._db_hang = None
 
@@ -101,8 +113,11 @@ class SimVoting:
         if t - s.started_at > 10:
             s.backoff = 0.1  # Docker resets the restart delay after 10 s of uptime
         s.state = "stopped"
+        s.died_at = t
         if name == "redis":
             self.queue.clear()  # the queue lives in memory only
+            if self.svcs["worker"].state == "paused":
+                self._worker_doomed = True  # measured: a worker frozen while Redis died exits on reconnect
         if name == "worker":
             self._worker_inflight = None  # popped but never written: lost
         if s.restart_policy in SELF_HEAL:
@@ -127,7 +142,12 @@ class SimVoting:
         self._t = t
 
     def _worker_tick(self, t: float) -> None:
-        nxt = t + (WORKER_TICK_S + WORKER_WORK_S) * self._slow("worker")
+        if self._worker_doomed and self._worker_ready and self.reach("redis", t) == "up":
+            self._worker_doomed = False
+            return self._exit("worker", t)
+        # a throttled worker loops slower; a throttled (overloaded) database makes each INSERT slower
+        db_slow = self._slow("db")
+        nxt = t + WORKER_TICK_S * self._slow("worker") + WORKER_WORK_S * (1 if db_slow == 1 else 20 * db_slow)
         if not self.svcs["worker"].connected:  # no DNS: OpenDbConnection keeps waiting, the loop throws
             if self._worker_ready:
                 return self._exit("worker", t)
@@ -184,7 +204,8 @@ class SimVoting:
             return "done", None, 0.002  # connection refused
         if v == "paused":
             return "wait", None, 0.0
-        base = (0.006 + self.rng.random() * 0.006) * self._slow("vote")
+        load = 1 + max(0, self.inflight - 6) * 0.08  # Flask dev server: latency grows with concurrent requests
+        base = (0.006 + self.rng.random() * 0.006) * self._slow("vote") * load
         r = self.reach("redis", t)
         if r == "down" and not self.svcs["redis"].connected:
             return "done", 500, base  # name resolves to nothing reachable: fails fast
@@ -192,6 +213,8 @@ class SimVoting:
             return "wait", None, 0.0  # measured: requests hang while Redis is gone, then 500 after vote's 5 s timeout
         self.queue.append((voter_id, vote))
         return "done", 200, base
+
+    try_unit = try_vote
 
     def stored_ids(self, prefix: str) -> set[str] | None:
         self.advance()

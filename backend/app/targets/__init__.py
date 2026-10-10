@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from .. import config
+from .hawkbit import HawkbitTarget
 from .voting import VotingTarget
 
+TARGETS = {"voting": VotingTarget, "hawkbit": HawkbitTarget}
 
-def load(name: str | None = None) -> VotingTarget:
+
+def load(name: str | None = None):
     name = name or config.TARGET
-    if name == "voting":
-        return VotingTarget(config.TARGET_DIR)
-    raise ValueError(f"Target '{name}' is not built yet. Use TARGET=voting.")
+    if name not in TARGETS:
+        raise ValueError(f"Unknown target '{name}'. Use one of: {', '.join(TARGETS)}")
+    target_dir = config.TARGET_DIR if name == config.TARGET else (config.REPO / "targets" / name).resolve()
+    return TARGETS[name](target_dir)
