@@ -40,6 +40,7 @@ class Engine:
         self._probe: Probe | None = None
         self._services: list[dict] = []
         self._cleanups: list = []
+        self._expected: dict | None = None  # service states at the first run: the healthy app
         self.analysis: dict | None = None
         self.fixes: dict | None = None
         self.applied_fixes: list[str] = []
@@ -130,6 +131,15 @@ class Engine:
                 await self.measure_baseline()
             await self.runner.wait_ready(self.order)  # start every experiment from a healthy app
             original = await self.runner.snapshot()
+            if self._expected is None:
+                self._expected = original
+            down = [n for n in self.order if self._expected.get(n, {}).get("state") == "running"
+                    and original.get(n, {}).get("state") != "running"]
+            if down:  # something stayed down after an earlier run: never start a new fault on a broken app
+                await self.runner.restore_all(self._expected, self.order)
+                await self.runner.wait_ready(self.order)
+                original = await self.runner.snapshot()
+                self.error = f"Pre-flight restarted {', '.join(down)}, which was down before this run"
             probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id)
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
@@ -171,10 +181,16 @@ class Engine:
             await probe.close()
             await self._tick(probe, t_begin, fault_s)
 
-            # final safety check: a service can fail after the fault is gone (e.g. on reconnect). Restart it and report it.
+            # final safety check: a service can fail after the fault is gone (e.g. on reconnect). Watch a few seconds more,
+            # then restart anything that differs from before the fault, and report it.
             notes: list[str] = []
-            after = await self.runner.snapshot()
-            broken = [n for n in self.order if n in original and differs(after[n], original[n])]
+            broken: list[str] = []
+            for _ in range(10):
+                after = await self.runner.snapshot()
+                broken = [n for n in self.order if n in original and differs(after[n], original[n])]
+                if broken:
+                    break
+                await self.clock.sleep(0.5)
             if broken:
                 await self.runner.restore_all(original, self.order)
                 notes.append(f"Secondary failure: {', '.join(broken)} failed after the fault was removed and stayed down "
@@ -442,6 +458,7 @@ class Engine:
             "services": self._services,
             "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms")} if self.baseline else None,
             "phase": self.phase,
+            "busy": self.busy,
             "current": cur,
             "results": self.results,
             "campaign": self.campaign,

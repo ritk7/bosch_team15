@@ -12,7 +12,9 @@ Measured on Docker (selftest, 2026-10-10), and the simulation follows the measur
 - crash redis: vote requests hang (no fast 500; the name "redis" stops resolving), so p95 trips the guard after ~4 s;
   the worker did not exit, it reconnected once Redis was back.
 - pause worker, then crash redis: acknowledged votes queued in Redis are lost (24 of 224), and the worker exits when it
-  is unfrozen and finds its Redis connection broken; with no restart policy it stays down. Other behaviour is unverified.
+  is unfrozen and finds its Redis connection broken; with no restart policy it stays down.
+- crash redis with `restart: unless-stopped`: Redis is back within ~1 s, the worker's connection breaks and it exits
+  (9 votes lost). Other behaviour is unverified.
 """
 from __future__ import annotations
 
@@ -56,6 +58,7 @@ class Svc:
     started_at: float = -100.0
     restart_at: float | None = None
     backoff: float = 0.1
+    died_at: float | None = None
 
 
 @dataclass
@@ -96,6 +99,8 @@ class SimVoting:
 
     def _start(self, name: str, t: float) -> None:
         s = self.svcs[name]
+        if name == "redis" and s.died_at is not None and t - s.died_at < 3 and self.svcs["worker"].state == "running":
+            self._worker_doomed = True  # measured: Redis back within ~1 s breaks the worker's connection and it exits
         s.state, s.started_at, s.restart_at = "running", t, None
         if name == "worker":
             self._worker_doomed = False
@@ -108,6 +113,7 @@ class SimVoting:
         if t - s.started_at > 10:
             s.backoff = 0.1  # Docker resets the restart delay after 10 s of uptime
         s.state = "stopped"
+        s.died_at = t
         if name == "redis":
             self.queue.clear()  # the queue lives in memory only
             if self.svcs["worker"].state == "paused":

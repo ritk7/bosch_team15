@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 
 from . import ledger, llm, score
 
@@ -64,9 +65,14 @@ async def pick(remaining: list[dict], results: list[dict], graph: dict) -> dict:
               "weakness, using the dependency graph and what was measured. Reply JSON only: "
               '{"experiment_id":"...","reason":"one sentence","hypothesis":"one sentence"}')
 
+    allowed = set(re.findall(r"\d+(?:\.\d+)?", prompt))
+
     def accept(text: str) -> bool:
         d = llm.extract_json(text) or {}
-        return d.get("experiment_id") in ids and bool(str(d.get("reason", "")).strip())
+        said = str(d.get("reason", "")) + " " + str(d.get("hypothesis", ""))
+        # no invented numbers: everything it quotes must be in the graph or the measurements it was given
+        return d.get("experiment_id") in ids and bool(str(d.get("reason", "")).strip()) and \
+            set(re.findall(r"\d+(?:\.\d+)?", said)) <= allowed
 
     try:
         res = await llm.complete("plan", prompt, system=system, max_tokens=200, min_tier="small", accept=accept)

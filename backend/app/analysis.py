@@ -116,7 +116,10 @@ def rules_fixes(found: list[dict], results: list[dict], graph: dict) -> list[dic
         services = [exp["target"]] + [s for s in nodes if any(s in n for n in r.get("notes", []))]
         if exp["type"] == "compound":
             services += [s.split(":")[1] for s in str(exp["params"].get("steps", "")).split(",") if ":" in s]
-        unhealed = [s for s in dict.fromkeys(services) if s in nodes and nodes[s]["restart"] not in SELF_HEAL]
+        # a restarted dependency breaks its clients' connections (measured: the worker exits), so clients need it too
+        clients = [e["from"] for e in graph["edges"] if e["kind"] == "dataflow" and e["to"] in services
+                   and nodes.get(e["from"], {}).get("role") in ("worker", "api")]
+        unhealed = [s for s in dict.fromkeys(services + clients) if s in nodes and nodes[s]["restart"] not in SELF_HEAL]
         if unhealed and (o["guard_tripped"] or o["recovery_s"] is None or r.get("notes")):
             for s in unhealed:
                 restart_targets.setdefault(s, []).append(f["id"])
