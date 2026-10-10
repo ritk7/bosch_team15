@@ -7,7 +7,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from . import config
-from .sim import WARMUP_S, Clock, SimVoting
+from .sim import Clock
 
 
 class Runner(Protocol):
@@ -47,14 +47,14 @@ class SimRunner:
     def reset(self) -> None:
         graph = self.target.graph()
         self.allowed = {n["id"] for n in graph["nodes"]}
-        self.app = SimVoting(self.clock, {n["id"]: n["restart"] for n in graph["nodes"]})
+        self.app = self.target.make_sim(self.clock, {n["id"]: n["restart"] for n in graph["nodes"]})
 
     def _check(self, svc: str) -> None:
         if svc not in self.allowed:
             raise ValueError(f"'{svc}' is not a service of the target compose project")
 
     async def ready(self) -> tuple[bool, str]:
-        return True, "Simulation of the voting app (no Docker needed)"
+        return True, f"Simulation of the {self.target.title} (no Docker needed)"
 
     async def services(self) -> list[dict]:
         self.app.advance()
@@ -125,7 +125,7 @@ class SimRunner:
                 await self.start(name)
             restored.append(name)
             # wait for this service before starting the ones that need it (as compose does with service_healthy)
-            for _ in range(int(WARMUP_S.get(name, 1.0) / 0.1) + 20):
+            for _ in range(int(self.app.warmup.get(name, 1.0) / 0.1) + 20):
                 if want["state"] != "running" or self.app.is_up(name):
                     break
                 await self.clock.sleep(0.1)
@@ -140,10 +140,13 @@ class SimRunner:
             self.app.stop(name)
         return "Simulation stopped: all services down"
 
-    def client(self):
-        from .targets.voting import SimClient
+    def set_policies(self, policies: dict[str, str | None]) -> None:
+        for name, policy in policies.items():
+            if name in self.app.svcs:
+                self.app.svcs[name].restart_policy = policy
 
-        return SimClient(self.app, self.clock)
+    def client(self):
+        return self.target.sim_client(self.app, self.clock)
 
 
 def docker_available(target) -> bool:

@@ -10,3 +10,4 @@ reports/
 docker-compose.fixes.yml
 .DS_Store
 .env
+targets/hawkbit-src/

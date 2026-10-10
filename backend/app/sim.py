@@ -63,6 +63,9 @@ class SimVoting:
     seed: int = 7
 
     def __post_init__(self) -> None:
+        self.warmup = WARMUP_S
+        self.hang_result: tuple[int | None, float] = (500, REDIS_TIMEOUT_S)  # vote's socket_timeout -> HTTP 500
+        self.inflight = 0  # concurrent probe requests, for traffic spikes
         self.svcs = {n: Svc(n, self.policies.get(n)) for n in WARMUP_S}
         self.queue: deque[tuple[str, str]] = deque()
         self.db: dict[str, str] = {}
@@ -127,7 +130,9 @@ class SimVoting:
         self._t = t
 
     def _worker_tick(self, t: float) -> None:
-        nxt = t + (WORKER_TICK_S + WORKER_WORK_S) * self._slow("worker")
+        # a throttled worker loops slower; a throttled (overloaded) database makes each INSERT slower
+        db_slow = self._slow("db")
+        nxt = t + WORKER_TICK_S * self._slow("worker") + WORKER_WORK_S * (1 if db_slow == 1 else 20 * db_slow)
         if not self.svcs["worker"].connected:  # no DNS: OpenDbConnection keeps waiting, the loop throws
             if self._worker_ready:
                 return self._exit("worker", t)
@@ -184,7 +189,8 @@ class SimVoting:
             return "done", None, 0.002  # connection refused
         if v == "paused":
             return "wait", None, 0.0
-        base = (0.006 + self.rng.random() * 0.006) * self._slow("vote")
+        load = 1 + max(0, self.inflight - 6) * 0.08  # Flask dev server: latency grows with concurrent requests
+        base = (0.006 + self.rng.random() * 0.006) * self._slow("vote") * load
         r = self.reach("redis", t)
         if r == "down" and not self.svcs["redis"].connected:
             return "done", 500, base  # name resolves to nothing reachable: fails fast
@@ -192,6 +198,8 @@ class SimVoting:
             return "wait", None, 0.0  # measured: requests hang while Redis is gone, then 500 after vote's 5 s timeout
         self.queue.append((voter_id, vote))
         return "done", 200, base
+
+    try_unit = try_vote
 
     def stored_ids(self, prefix: str) -> set[str] | None:
         self.advance()

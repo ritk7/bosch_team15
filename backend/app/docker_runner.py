@@ -180,8 +180,23 @@ class DockerRunner:
                     "connected": self.connected[s], "cpus": self.cpus[s]} for s in self.allowed}
 
     async def crash(self, svc: str) -> None:
+        """Make the main process exit, as a real crash would. `docker kill` marks the container as manually stopped, so a
+        restart policy would never fire (measured); a signal from inside the container does not. Processes that ignore
+        the signal as PID 1 (e.g. vote's Flask dev server) fall back to `docker compose kill`."""
         self._check(svc)
+        container = await self._container(svc)
+        before = await self._started(container)
+        await self.exe(self.compose_args("exec", "-T", svc, "sh", "-c", "kill -TERM 1"), 10.0)
+        for _ in range(8):
+            await asyncio.sleep(0.5)
+            now = await self._started(container)
+            if now != before:  # exited, or exited and already restarted by its policy
+                return
         await self._compose("kill", "-s", "SIGKILL", svc)
+
+    async def _started(self, container: str) -> str:
+        code, out, _ = await self.exe([self.docker, "inspect", "-f", "{{.State.Status}} {{.State.StartedAt}}", container], 10.0)
+        return out.strip() if code == 0 else ""
 
     async def start(self, svc: str) -> None:
         self._check(svc)
@@ -269,7 +284,7 @@ class DockerRunner:
         await self._compose("stop", timeout=120)
         return f"docker compose stop done for project '{self.project}'"
 
-    def client(self) -> DockerClient:
+    def client(self):
         if self._client is None:
-            self._client = DockerClient(self)
+            self._client = self.target.docker_client(self)
         return self._client

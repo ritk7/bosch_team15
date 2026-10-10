@@ -38,6 +38,7 @@ class Engine:
         self.task: asyncio.Task | None = None
         self._probe: Probe | None = None
         self._services: list[dict] = []
+        self._cleanups: list = []
         self.refresh_graph()
 
     # ---- graph ---------------------------------------------------------------------------------------------
@@ -45,7 +46,7 @@ class Engine:
         self.graph = self.target.graph()
         self.sync = mapper.sync_path(self.graph, self.target.entry)
         self.order = mapper.topo_order(self.graph)
-        self.catalog = injectors.catalog(self.graph, self.sync)
+        self.catalog = injectors.catalog(self.graph, self.sync, self.target.entry, self.target.extra_experiments(self.graph))
 
     def experiment(self, exp_id: str) -> dict:
         for e in self.catalog:
@@ -129,11 +130,12 @@ class Engine:
             self.phase = "inject"
             state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
             self.guard.arm()  # never a fault without the guard
-            await injectors.apply(self.runner, exp)
+            self._cleanups = await injectors.apply(self.runner, exp, probe)
             self.phase = "observe"
             await self._watch(probe, until=self.t0 + fault_s, t_begin=t_begin, fault_s=fault_s, guarded=True)
 
             self.phase = "restore"
+            await self._run_cleanups()
             await self.runner.restore_all(original, self.order)
             state.clear_active_fault()
             restored_at = self.clock.now()
@@ -170,6 +172,7 @@ class Engine:
             self.phase = "done"
             return None
         finally:
+            await self._run_cleanups()
             if probe:
                 await probe.close()
             if original is not None and restored_at is None:
@@ -177,6 +180,14 @@ class Engine:
             self.guard.disarm()
             self._probe = None
             state.save_snapshot(await self.state_json())
+
+    async def _run_cleanups(self) -> None:
+        cleanups, self._cleanups = self._cleanups, []
+        for c in cleanups:
+            try:
+                await c()
+            except Exception:  # a failed cleanup must not stop the restore
+                pass
 
     async def _restore(self, original: dict) -> list[str]:
         restored = await self.runner.restore_all(original, self.order)

@@ -35,7 +35,8 @@ def test_contract_shapes_and_a_full_run(tmp_path, monkeypatch):
         assert t["unit"]["plural"] == "votes" and len(t["services"]) == 5
 
         cat = client.get("/api/catalog").json()["experiments"]
-        assert cat[0]["id"] == "crash-redis" and cat == sorted(cat, key=lambda e: -e["risk_hint"])
+        assert {"crash-redis", "hang-redis", "compound-worker-hang-redis-crash"} <= {e["id"] for e in cat}
+        assert cat == sorted(cat, key=lambda e: -e["risk_hint"])
 
         assert client.post("/api/predict", json={"experiment_id": "nope"}).status_code == 404
         p = client.post("/api/predict", json={"experiment_id": "crash-redis"}).json()
