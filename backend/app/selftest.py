@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import secrets
 import sys
 
 from . import config, state, targets
@@ -29,6 +30,7 @@ async def main() -> int:
     runner = DockerRunner(target)
     engine = Engine(target, runner)
     await engine.recover_on_startup()
+    engine.load_snapshot(state.load_snapshot(target.name))  # self-tests append evidence, never replace demo history
 
     print("  ...   starting the app (first build takes a few minutes)", flush=True)
     try:
@@ -57,7 +59,10 @@ async def main() -> int:
 
     exp = engine.experiment(target.selftest_experiment)
     victim = exp["target"]
-    task = asyncio.create_task(engine.run("selftest", exp, "selftest", 10.0))
+    # hawkBit persists controller IDs. A fixed "selftest" prefix caused HTTP 409s on subsequent runs, falsely
+    # attributing duplicate-device errors (even before injection) to the fault being tested.
+    run_id = f"selftest-{secrets.token_hex(8)}"
+    task = asyncio.create_task(engine.run(run_id, exp, "selftest", 10.0))
     saw_down = False
     while not task.done():
         if engine.phase in ("observe", "restore") and engine.guard.armed:
