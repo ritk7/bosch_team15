@@ -33,7 +33,7 @@ export interface TierStatus {
 
 export type RunnerKind = "docker" | "sim";
 export type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
-export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "latency";
+export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "latency";
 export type Confidence = "low" | "medium" | "high";
 export type Phase = "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
 export type VoteState = "ok" | "queued" | "error" | "lost" | "pending";
@@ -289,6 +289,8 @@ const post = <T>(path: string, body?: unknown) =>
 export const api = {
   health: () => request<Health>("/api/health"),
   target: () => request<Target>("/api/target"),
+  targets: () => request<{ targets: { name: string; title: string }[]; current: string }>("/api/targets"),
+  selectTarget: (name: string) => post<{ ok: boolean; detail: string }>("/api/target/select", { name }),
   startTarget: () => post<{ ok: boolean; detail: string }>("/api/target/start"),
   stopTarget: () => post<{ ok: boolean; detail: string }>("/api/target/stop"),
   catalog: () => request<{ experiments: Experiment[] }>("/api/catalog"),

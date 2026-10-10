@@ -67,6 +67,25 @@ async def target() -> dict:
             "assumptions": e.target.assumptions(e.rate), "services": await e.runner.services(), "unit": e.target.unit}
 
 
+@app.get("/api/targets")
+def list_targets() -> dict:
+    return {"targets": [{"name": n, "title": cls.title} for n, cls in targets.TARGETS.items()],
+            "current": eng().target.name}
+
+
+@app.post("/api/target/select")
+async def select_target(body: dict = Body(...)) -> dict:
+    """Switch the app under test. In Docker mode the other target's containers must be started separately."""
+    global engine
+    idle()
+    name = str(body.get("name"))
+    if name not in targets.TARGETS:
+        raise HTTPException(404, f"Unknown target '{name}'")
+    target = targets.load(name)
+    engine = Engine(target, make_runner(target))
+    return {"ok": True, "detail": f"Now testing the {target.title} ({engine.runner.kind})"}
+
+
 @app.post("/api/target/start")
 async def target_start() -> dict:
     return {"ok": True, "detail": await idle().runner.up()}

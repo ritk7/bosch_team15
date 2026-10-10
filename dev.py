@@ -5,7 +5,7 @@
     python dev.py serve    build the UI and serve everything on :8000 (use this for the demo)
     python dev.py test     backend tests
     python dev.py check    backend tests, then UI type check and build
-    python dev.py selftest real Docker: start targets/voting, crash redis once, PASS/FAIL per step
+    python dev.py selftest [--target hawkbit]  real Docker: start the target, crash once, PASS/FAIL per step
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def start_backend(reload: bool) -> subprocess.Popen:
 def main() -> None:
     cmd = sys.argv[1] if len(sys.argv) > 1 else "dev"
     if cmd == "selftest":
-        sys.exit(subprocess.call([sys.executable, "-m", "app.selftest"], cwd=BACKEND))
+        sys.exit(subprocess.call([sys.executable, "-m", "app.selftest", *sys.argv[2:]], cwd=BACKEND))
     if cmd == "test":
         sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q"], cwd=BACKEND))
     need_backend_deps()

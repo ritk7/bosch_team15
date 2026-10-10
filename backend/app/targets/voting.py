@@ -47,6 +47,7 @@ class VotingTarget:
     name = "voting"
     title = "voting app"
     entry = "vote"  # the probe sends units here
+    selftest_experiment = "crash-redis"
     unit = {"singular": "vote", "plural": "votes", "stored": "stored", "lost": "lost silently"}
     roles = {"vote": "web", "redis": "queue", "worker": "worker", "db": "database", "result": "web"}
     extra_edges = [

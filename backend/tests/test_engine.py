@@ -20,8 +20,8 @@ def isolated_state(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "LAST_STATE", tmp_path / "last_state.json")
 
 
-def make_engine() -> Engine:
-    target = targets.load("voting")
+def make_engine(name: str = "voting") -> Engine:
+    target = targets.load(name)
     return Engine(target, SimRunner(target, Clock(SPEED)))
 
 
@@ -53,9 +53,10 @@ def test_guard_quiet_below_limits_when_disarmed_and_with_few_samples():
 
 
 # ---- engine on the simulation ----------------------------------------------------------------------------------
-def test_every_experiment_restores_original_states():
+@pytest.mark.parametrize("name", ["voting", "hawkbit"])
+def test_every_experiment_restores_original_states(name):
     async def go():
-        e = make_engine()
+        e = make_engine(name)
         original = await e.runner.snapshot()
         for exp in e.catalog:
             result = await e.run(f"t{exp['target']}", exp, "test", 4.0)
@@ -140,3 +141,21 @@ def test_map_has_five_services_and_dataflow():
     assert nodes["redis"]["fan_in"] == 2 and nodes["redis"]["spof"] and nodes["redis"]["restart"] is None
     assert {("vote", "redis"), ("worker", "redis"), ("worker", "db"), ("result", "db")} <= \
         {(e["from"], e["to"]) for e in g["edges"] if e["kind"] == "dataflow"}
+
+
+def test_compound_failure_loses_acknowledged_votes_silently():
+    async def go():
+        e = make_engine()
+        return await e.run("tghost", e.experiment("compound-worker-hang-redis-crash"), "before", 10.0)
+
+    o = run(go())["outcome"]
+    assert o["lost"] > 0 and o["data_loss"]  # acknowledged with HTTP 200, then gone
+    assert o["acked"] >= o["stored"] + o["lost"]
+
+
+def test_hawkbit_map_and_units():
+    t = targets.load("hawkbit")
+    g = t.graph()
+    assert sorted(n["id"] for n in g["nodes"]) == ["hawkbit", "mysql", "rabbitmq"]
+    assert {n["id"]: n["restart"] for n in g["nodes"]} == {"hawkbit": "always", "mysql": "always", "rabbitmq": "on-failure"}
+    assert t.unit["plural"] == "devices"

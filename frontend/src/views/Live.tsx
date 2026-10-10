@@ -110,7 +110,7 @@ export function Live({ state, target, catalog, onChange }: Props) {
         {/* choose */}
         <div className="space-y-6">
           <section aria-labelledby="map-h" className="border border-rule bg-surface p-4">
-            <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map</h2>
+            <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map: {target.name === "hawkbit" ? "Bosch hawkBit" : "voting app"}</h2>
             <p className="mt-1 mb-3 text-[0.8rem] text-graphite">
               {target.graph.nodes.length} services read from <span className="wd-condensed">{target.compose_file}</span>, plus the data flows the compose file does not declare.
             </p>
@@ -158,7 +158,6 @@ export function Live({ state, target, catalog, onChange }: Props) {
                       <span className="mt-0.5 block text-[0.8rem] text-graphite">{exp.description}</span>
                     </button>
                   ))}
-                  <p className="text-xs text-graphite">Slowdowns, network cuts and compound failures arrive in the next milestone.</p>
                 </div>
               </>
             )}

@@ -159,7 +159,12 @@ def docker_available(target) -> bool:
     if not exe or not (target.target_dir / "docker-compose.yml").exists():
         return False
     try:
-        return subprocess.run([exe, "info"], capture_output=True, timeout=8).returncode == 0
+        if subprocess.run([exe, "info"], capture_output=True, timeout=8).returncode != 0:
+            return False
+        # only when this target's containers are actually up (run one target at a time; both use port 8080)
+        ps = subprocess.run([exe, "compose", "-p", target.target_dir.name, "-f", str(target.compose_file()), "ps", "-q"],
+                            capture_output=True, text=True, timeout=15)
+        return ps.returncode == 0 and bool(ps.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
         return False
 

@@ -48,8 +48,8 @@ def build_graph(compose: Path, *, roles: dict[str, str] | None = None, extra_edg
         image = spec.get("image") or f"built from {context or '.'}"
         role = roles.get(name) or next((r for key, r in ROLE_BY_IMAGE if key in str(image)), None) \
             or ("web" if spec.get("ports") else "other")
-        restart = spec.get("restart")
-        restart = None if restart in (None, "no", False) else str(restart)
+        restart = spec.get("restart") or ((spec.get("deploy") or {}).get("restart_policy") or {}).get("condition")
+        restart = None if restart in (None, "no", "none", False) else str(restart)
         replicas = int(((spec.get("deploy") or {}).get("replicas")) or 1)
         named_volume = any(isinstance(v, str) and not v.startswith((".", "/", "~")) and ":" in v
                            for v in spec.get("volumes") or [])

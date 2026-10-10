@@ -70,6 +70,7 @@ class Engine:
 
     # ---- baseline ------------------------------------------------------------------------------------------
     async def measure_baseline(self, duration_s: float = 5.0) -> dict:
+        await self.target.prepare(self.runner)
         probe = Probe(self.runner.client(), self.clock, self.rate, f"b{secrets.token_hex(3)}")
         probe.start()
         try:
