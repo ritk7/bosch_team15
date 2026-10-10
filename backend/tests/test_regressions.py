@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app import main, state, targets
 from app.campaign import Busy, Engine
 from app.runner import SimRunner
+from app.probe import Probe
 from app.sim import Clock
 
 
@@ -79,6 +80,30 @@ def test_unhealthy_baseline_blocks_fault_injection():
         assert result is None and "Baseline is not healthy" in e.error
         assert await e.runner.snapshot() == original
         assert state.load_active_fault() is None
+    asyncio.run(go())
+
+
+def test_slow_verified_restore_does_not_consume_recovery_observation_window(monkeypatch):
+    async def go():
+        e = engine(persist=False)
+        restore = e.runner.restore_all
+        checked = []
+
+        async def slow_restore(original, order):
+            restored = await restore(original, order)
+            await e.clock.sleep(50)  # health verification alone exceeded the armed-fault wall limit
+            return restored
+
+        def recovered(probe, since, now, need=5):
+            checked.append((since, now, e.guard.armed))
+            return True
+
+        monkeypatch.setattr(e.runner, "restore_all", slow_restore)
+        monkeypatch.setattr(Probe, "recovered_since", recovered)
+        result = await e.run("slow-restore", e.experiment("crash-worker"), "test", 1)
+        assert result is not None, e.error
+        assert checked and all(not armed for _, _, armed in checked)
+
     asyncio.run(go())
 
 

@@ -76,6 +76,9 @@ The cost ledger is persisted atomically in the git-ignored `backend/.cache/cost_
 Restoration waits up to 90 seconds per service for running/healthy status: Docker's default health-check interval is
 30 seconds, so a recovered MySQL process can remain `starting` until its next check. This is verification time, not
 permission to keep injecting a fault after a guard trips.
+Once restoration is verified and the guard is disarmed, recovery has its own bounded 30-second observation window;
+time spent waiting for service health checks does not subtract from that window. Self-tests use unique device IDs
+on every invocation and append to saved run history.
 
 ## The demo (90 seconds)
 1. Live tab: click **redis** → **Pause worker, then crash redis**. The AI prediction appears; optionally type your own guess.

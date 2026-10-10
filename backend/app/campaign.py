@@ -264,7 +264,9 @@ class Engine:
             self.guard.disarm()
 
             self.phase = "recover"
-            while self.clock.now() - restored_at < RECOVER_MAX_S and self.clock.now() - t_begin < self.guard.thresholds.max_wall_s:
+            # The guard's wall limit bounds an armed fault, not observation after verified restoration. Slow
+            # health checks must not consume the separate, bounded recovery window and hide actual recovery.
+            while self.clock.now() - restored_at < RECOVER_MAX_S:
                 if probe.recovered_since(restored_at, self.clock.now()):
                     break
                 await self._tick(probe, t_begin, fault_s)
