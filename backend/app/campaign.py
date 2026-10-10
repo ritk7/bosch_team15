@@ -9,7 +9,7 @@ import asyncio
 import secrets
 import time
 
-from . import agents, analysis, config, fixes, injectors, ledger, mapper, score, state
+from . import agents, analysis, config, fixes, injectors, ledger, mapper, planner, score, state
 from .guard import Guard
 from .probe import Probe, p95
 from .runner import differs
@@ -24,7 +24,8 @@ class Busy(RuntimeError):
 
 
 class Engine:
-    def __init__(self, target, runner, rate: float | None = None):
+    def __init__(self, target, runner, rate: float | None = None, persist: bool = True):
+        self.persist = persist  # the twin engine never touches the safety files
         self.target, self.runner = target, runner
         self.clock = runner.clock
         self.rate = rate or config.PROBE_RATE
@@ -43,6 +44,9 @@ class Engine:
         self.fixes: dict | None = None
         self.applied_fixes: list[str] = []
         self.score_history: list[dict] = []
+        self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
+        self.compare: dict | None = None
+        self.twin: dict | None = None
         self.refresh_graph()
 
     # ---- graph ---------------------------------------------------------------------------------------------
@@ -134,7 +138,8 @@ class Engine:
             await self._watch(probe, until=self.t0, t_begin=t_begin, fault_s=fault_s)
 
             self.phase = "inject"
-            state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
+            if self.persist:
+                state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
             self.guard.arm()  # never a fault without the guard
             self._cleanups = await injectors.apply(self.runner, exp, probe)
             self.phase = "observe"
@@ -143,7 +148,8 @@ class Engine:
             self.phase = "restore"
             await self._run_cleanups()
             await self.runner.restore_all(original, self.order)
-            state.clear_active_fault()
+            if self.persist:
+                state.clear_active_fault()
             restored_at = self.clock.now()
             self.guard.disarm()
 
@@ -195,7 +201,8 @@ class Engine:
                 await asyncio.shield(self._restore(original))
             self.guard.disarm()
             self._probe = None
-            state.save_snapshot(await self.state_json())
+            if self.persist:
+                state.save_snapshot(await self.state_json())
 
     async def _run_cleanups(self) -> None:
         cleanups, self._cleanups = self._cleanups, []
@@ -320,6 +327,79 @@ class Engine:
         self.task = asyncio.create_task(sequence())
         return [e["id"] for e in exps]
 
+    # ---- campaign and twin -----------------------------------------------------------------------------------
+    def start_campaign(self, budget: int, strategy: str, seed: int = 7) -> None:
+        if self.busy:
+            raise Busy("An experiment is running")
+        budget = max(1, min(budget, len(self.catalog)))
+        self.campaign = {"status": "running", "strategy": strategy, "budget": budget, "picks": [],
+                         "remaining": [e["id"] for e in self.catalog]}
+
+        async def loop() -> None:
+            done: list[dict] = []
+            order = planner.random_order(self.catalog, seed) if strategy == "random" else []
+            try:
+                for i in range(budget):
+                    remaining = [e for e in self.catalog if e["id"] in self.campaign["remaining"]]
+                    if strategy == "random":
+                        p = {"experiment": order[i], "reason": f"random order (seed {seed})",
+                             "hypothesis": order[i]["description"], "decided_by": "rules", "model": "random"}
+                    else:
+                        p = await planner.pick(remaining, done, self.graph)
+                    exp = p["experiment"]
+                    self.campaign["picks"].append({"experiment_id": exp["id"], "reason": p["reason"],
+                                                   "hypothesis": p["hypothesis"], "decided_by": p["decided_by"],
+                                                   "model": p["model"], "order": i + 1})
+                    self.campaign["remaining"] = [x for x in self.campaign["remaining"] if x != exp["id"]]
+                    await self.predict(exp["id"])
+                    r = await self.run(f"r{secrets.token_hex(3)}", exp, f"campaign {strategy}", config.FAULT_S)
+                    if r:
+                        done.append(r)
+                self.campaign["status"] = "done"
+                await self.analyze()
+                await self.recommend()
+                await self.run_twin()
+            except asyncio.CancelledError:
+                self.campaign["status"] = "stopped"
+                raise
+
+        self.task = asyncio.create_task(loop())
+
+    async def stop_campaign(self) -> list[str]:
+        restored = await self.killswitch()
+        if self.campaign["status"] == "running":
+            self.campaign["status"] = "stopped"
+        return restored
+
+    async def run_twin(self, speed: float = 60.0) -> dict:
+        """Rehearse the whole catalog on the digital twin (simulation with the same graph and restart policies)."""
+        from .runner import SimRunner
+        from .sim import Clock
+
+        self.twin = {"status": "running", "rows": [], "ran_at": time.time()}
+        twin = Engine(self.target, SimRunner(self.target, Clock(speed)), rate=self.rate, persist=False)
+        twin.baseline = {"rps": self.rate, "error_pct": 0.0, "p95_ms": 10.0, "votes_sent": 0, "votes_stored": 0}
+        started = time.perf_counter()
+        fan = {n["id"]: n["fan_in"] for n in self.graph["nodes"]}
+        for exp in twin.catalog:
+            r = await twin.run(f"t{secrets.token_hex(2)}", exp, "twin", config.FAULT_S)
+            if not r:
+                continue
+            o = r["outcome"]
+            self.twin["rows"].append({"experiment_id": exp["id"], "title": exp["title"], "target": exp["target"],
+                                      "type": exp["type"], "penalty": round(score.penalty(r, fan.get(exp["target"], 0))[0], 1),
+                                      "error_pct": o["error_pct"], "lost": o["lost"], "recovery_s": o["recovery_s"],
+                                      "guard_tripped": o["guard_tripped"]})
+        self.twin["status"] = "done"
+        self.twin["seconds"] = round(time.perf_counter() - started, 1)
+        self.compare = planner.compare(twin.results, twin.catalog, self.graph)
+        return self.twin
+
+    def start_twin(self) -> None:
+        if self.busy:
+            raise Busy("An experiment is running")
+        self.task = asyncio.create_task(self.run_twin())
+
     async def reset_demo(self) -> str:
         """Undo applied fixes and clear runs, so the next judge sees the original app."""
         if self.busy:
@@ -329,6 +409,8 @@ class Engine:
         await self.runner.apply_overlay([n["id"] for n in self.graph["nodes"]], reset=True)
         self.results, self.analysis, self.fixes, self.applied_fixes = [], None, None, []
         self.score_history, self.current, self.phase, self.error = [], None, "idle", None
+        self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
+        self.compare, self.twin = None, None
         return "Fixes removed and runs cleared"
 
     # ---- kill switch ---------------------------------------------------------------------------------------
@@ -362,13 +444,14 @@ class Engine:
             "phase": self.phase,
             "current": cur,
             "results": self.results,
-            "campaign": {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []},
+            "campaign": self.campaign,
+            "twin": self.twin,
             "analysis": self.analysis,
             "fixes": {**self.fixes, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")}
                                               for x in self.fixes["fixes"]]} if self.fixes else None,
             "applied_fixes": self.applied_fixes,
             "score_history": self.score_history,
-            "compare": None,
+            "compare": self.compare,
             "cost": ledger.summary(),
             "error": self.error,
         }

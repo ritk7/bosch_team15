@@ -11,7 +11,7 @@ from app.guard import Guard
 from app.runner import SimRunner
 from app.sim import Clock
 
-SPEED = 40.0
+SPEED = 20.0
 
 
 @pytest.fixture(autouse=True)

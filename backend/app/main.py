@@ -138,6 +138,33 @@ async def killswitch() -> dict:
     return {"ok": True, "restored": await eng().killswitch()}
 
 
+@app.post("/api/campaign/start")
+async def campaign_start(body: dict = Body(...)) -> dict:
+    strategy = str(body.get("strategy") or "ai")
+    if strategy not in ("ai", "random"):
+        raise HTTPException(422, "strategy must be ai or random")
+    try:
+        idle().start_campaign(int(body.get("budget") or 5), strategy, int(body.get("seed") or 7))
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
+    return {"ok": True}
+
+
+@app.post("/api/campaign/stop")
+async def campaign_stop() -> dict:
+    return {"ok": True, "restored": await eng().stop_campaign()}
+
+
+@app.post("/api/twin")
+async def twin() -> dict:
+    """Rehearse every experiment on the digital twin in seconds; results land in /state.twin and /state.compare."""
+    try:
+        idle().start_twin()
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
+    return {"ok": True}
+
+
 @app.post("/api/analyze")
 async def analyze() -> dict:
     e = idle()

@@ -10,7 +10,7 @@ from app.runner import SimRunner
 from app.sim import Clock
 
 STATE_KEYS = {"runner", "services", "baseline", "phase", "current", "results", "campaign", "analysis", "fixes",
-              "applied_fixes", "score_history", "compare", "cost", "error"}
+              "applied_fixes", "score_history", "twin", "compare", "cost", "error"}
 NODE_KEYS = {"id", "role", "image", "ports", "healthcheck", "restart", "stateful", "replicas", "depends_on", "fan_in",
              "spof", "notes"}
 OUTCOME_KEYS = {"sent", "acked", "stored", "lost", "errors", "error_pct", "p95_ms", "peak_p95_ms", "recovery_s",

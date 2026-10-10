@@ -19,10 +19,11 @@ TEXT = {
 }
 
 
-def risk_hint(node: dict, max_fan_in: int, on_request_path: bool, kind: str = "crash") -> float:
-    """Graph rules, 0..1: shared, stateful, unprotected services on the request path are the riskiest to lose."""
+def risk_hint(node: dict, max_fan_in: int, on_request_path: bool, kind: str = "crash", entry: bool = False) -> float:
+    """Graph rules, 0..1: shared, stateful, unprotected services on the request path are the riskiest to lose.
+    The entry service counts as a single point of failure too: every user depends on it, even if no service does."""
     score = 0.1
-    score += 0.25 if node["spof"] else 0.0
+    score += 0.25 if node["spof"] or (entry and node["replicas"] == 1) else 0.0
     score += 0.2 * (node["fan_in"] / max_fan_in) if max_fan_in else 0.0
     score += 0.15 if node["stateful"] else 0.0
     score += 0.1 if node["restart"] is None else 0.0
@@ -30,12 +31,12 @@ def risk_hint(node: dict, max_fan_in: int, on_request_path: bool, kind: str = "c
     return round(min(1.0, score * TYPE_WEIGHT.get(kind, 1.0)), 2)
 
 
-def _exp(kind: str, node: dict, max_fan: int, sync: set[str], **params) -> dict:
+def _exp(kind: str, node: dict, max_fan: int, sync: set[str], entry: str | None = None, **params) -> dict:
     t = node["id"]
     title, desc = TEXT[kind]
     return {"id": f"{kind.replace('_', '-')}-{t}", "type": kind, "target": t,
             "title": title.format(t=t, **params), "description": desc.format(t=t, **params), "params": params,
-            "risk_hint": risk_hint(node, max_fan, t in sync, kind)}
+            "risk_hint": risk_hint(node, max_fan, t in sync, kind, entry=t == entry)}
 
 
 def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[dict] | None = None) -> list[dict]:
@@ -43,15 +44,15 @@ def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[d
     max_fan = max((n["fan_in"] for n in nodes), default=0)
     out = []
     for node in nodes:
-        out.append(_exp("crash", node, max_fan, sync))
+        out.append(_exp("crash", node, max_fan, sync, entry))
         if node["role"] in ("cache", "queue", "database", "worker") or node["id"] in sync:
-            out.append(_exp("hang", node, max_fan, sync))
+            out.append(_exp("hang", node, max_fan, sync, entry))
         if node["stateful"] and node["fan_in"] > 0:
-            out.append(_exp("network_cut", node, max_fan, sync))
+            out.append(_exp("network_cut", node, max_fan, sync, entry))
         if node["role"] in ("database", "worker"):
-            out.append(_exp("cpu_throttle", node, max_fan, sync, cpus=0.1))
+            out.append(_exp("cpu_throttle", node, max_fan, sync, entry, cpus=0.1))
         if node["id"] == entry:
-            out.append(_exp("traffic_spike", node, max_fan, sync, multiplier=6))
+            out.append(_exp("traffic_spike", node, max_fan, sync, entry, multiplier=6))
     out += extra or []
     return sorted(out, key=lambda e: (-e["risk_hint"], e["id"]))
 

@@ -3,10 +3,12 @@ import { CostGauge } from "./components/CostGauge";
 import { TierStatus } from "./components/TierStatus";
 import { api, type Experiment, type Health, type State, type Target } from "./lib/api";
 import { LedgerView } from "./views/LedgerView";
+import { Findings } from "./views/Findings";
 import { Live } from "./views/Live";
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "findings", label: "Findings" },
   { id: "cost", label: "Cost" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -121,6 +123,7 @@ export default function App() {
           </p>
         )}
         {tab === "live" && state && target && <Live state={state} target={target} catalog={catalog} onChange={poll} />}
+        {tab === "findings" && state && target && <Findings state={state} target={target} onChange={poll} />}
         {tab === "cost" && (
           <div className="space-y-10">
             {state && <CostGauge cost={state.cost} runKey={String(state.results.length)} />}
