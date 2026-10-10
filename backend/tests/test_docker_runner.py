@@ -110,6 +110,28 @@ def test_wait_timeout_and_repeated_exit_are_failures(monkeypatch):
         asyncio.run(r._wait_up("redis", 0))
 
 
+def test_restore_allows_default_30_second_healthcheck_interval(monkeypatch):
+    rows = [{"Service": "mysql", "Name": "hawkbit-mysql-1", "State": "running", "Health": "starting"}]
+    fake = FakeExec(rows)
+    r = DockerRunner(targets.load("hawkbit"), executor=fake)
+    elapsed = [0.0]
+
+    async def go():
+        monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: elapsed[0])
+
+        async def sleep(seconds):
+            elapsed[0] += seconds
+            if elapsed[0] >= 30:
+                rows[0]["Health"] = "healthy"
+
+        monkeypatch.setattr(asyncio, "sleep", sleep)
+        await r.restore_all({"mysql": {"state": "running", "connected": True, "cpus": None}}, ["mysql"])
+
+    asyncio.run(go())
+    assert elapsed[0] == 30
+    assert rows[0]["Health"] == "healthy"
+
+
 def test_restore_attempts_remaining_services_after_one_failure():
     rows = [{"Service": s, "Name": f"voting-{s}-1", "State": "exited", "Health": ""}
             for s in ("redis", "worker")]

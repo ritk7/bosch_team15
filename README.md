@@ -73,6 +73,9 @@ restoration time; older saved runs lack this timestamp and are not given invente
 means the probe did not establish five consecutive healthy units during the bounded recovery window, not proof that
 the application can never recover. Baselines are remeasured after restarts, fixes and resets.
 The cost ledger is persisted atomically in the git-ignored `backend/.cache/cost_ledger.json`; resetting the ledger is explicit.
+Restoration waits up to 90 seconds per service for running/healthy status: Docker's default health-check interval is
+30 seconds, so a recovered MySQL process can remain `starting` until its next check. This is verification time, not
+permission to keep injecting a fault after a guard trips.
 
 ## The demo (90 seconds)
 1. Live tab: click **redis** → **Pause worker, then crash redis**. The AI prediction appears; optionally type your own guess.

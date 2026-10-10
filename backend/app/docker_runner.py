@@ -289,8 +289,12 @@ class DockerRunner:
             raise RuntimeError(f"docker update failed: {err.strip()[:200]}")
         self.cpus[svc] = cpus
 
-    async def _wait_up(self, svc: str, max_s: float = 25.0) -> None:
-        """Wait until the service runs, and until it is healthy when other services depend on it."""
+    async def _wait_up(self, svc: str, max_s: float = 90.0) -> None:
+        """Wait for running/healthy, including health checks scheduled at Docker's default 30 s interval.
+
+        The old 25 s restore deadline expired before MySQL's first post-crash health check even when its process
+        was already answering. Keep verification bounded, but allow multiple checks before reporting failure.
+        """
         deadline, exited = asyncio.get_running_loop().time() + max_s, 0
         while asyncio.get_running_loop().time() < deadline:
             row = next((r for r in await self._ps() if r.get("Service") == svc), {})
