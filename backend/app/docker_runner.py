@@ -240,10 +240,13 @@ class DockerRunner:
 
     async def _wait_up(self, svc: str, max_s: float = 25.0) -> None:
         """Wait until the service runs, and until it is healthy when other services depend on it."""
-        waited = 0.0
+        waited, exited = 0.0, 0
         while waited < max_s:
             row = next((r for r in await self._ps() if r.get("Service") == svc), {})
             running = row.get("State") == "running"
+            exited = exited + 1 if row.get("State") in ("exited", "dead") else 0
+            if exited >= 3:  # it died again on its own; the final safety check restarts and reports it
+                return
             healthy = row.get("Health") in ("", None, "healthy") or svc not in self.depended_on
             if running and healthy:
                 return
