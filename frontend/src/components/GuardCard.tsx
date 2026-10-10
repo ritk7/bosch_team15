@@ -73,10 +73,10 @@ export function GuardCard({ guard, last, wallS, phase, busy, onKill, killing, re
       <button
         type="button"
         onClick={onKill}
-        disabled={killing}
+        disabled={killing || !busy}
         className="mt-5 w-full bg-crit px-4 py-3 text-left text-paper hover:opacity-90 disabled:opacity-60"
       >
-        <span className="wd-wide block text-lg font-semibold">{killing ? "Restoring…" : "Kill switch"}</span>
+        <span className="wd-wide block text-lg font-semibold">{killing ? "Restoring…" : busy ? "Kill switch" : "Kill switch: nothing to stop"}</span>
         <span className="block text-sm opacity-90">Stop the fault now and restore every service</span>
       </button>
     </section>

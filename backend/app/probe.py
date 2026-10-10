@@ -55,7 +55,8 @@ def p95(values: list[float]) -> float:
 
 
 class Probe:
-    def __init__(self, client, clock, rate: float, run_id: str):
+    def __init__(self, client, clock, rate: float, run_id: str, poll_s: float = POLL_S):
+        self.poll_s = poll_s
         if not math.isfinite(rate) or rate <= 0:
             raise ValueError("Probe rate must be a finite positive number")
         self.client, self.clock, self.rate = client, clock, rate
@@ -101,7 +102,7 @@ class Probe:
 
     async def _poll_loop(self) -> None:
         while True:
-            await self.clock.sleep(POLL_S)
+            await self.clock.sleep(self.poll_s)
             await self.poll()
 
     async def poll(self, final: bool = False) -> None:

@@ -56,7 +56,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
             className="border border-rule px-3 py-2 text-graphite hover:text-ink disabled:opacity-50">
             Random order
           </button>
-          {c.status === "running" && (
+          {c.status === "running" && state.busy && (
             <button type="button" onClick={() => act(() => api.stopCampaign())} className="bg-crit px-3 py-2 font-semibold text-paper">
               Stop and restore
             </button>

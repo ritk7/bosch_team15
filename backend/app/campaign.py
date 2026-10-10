@@ -49,6 +49,8 @@ class Engine:
         self._services: list[dict] = []
         self._cleanups: list = []
         self._targets: set[str] = set()
+        self._status: dict | None = None
+        self._status_task: asyncio.Task | None = None
         self.restored_from: float | None = None
         self._expected: dict | None = None  # service states at the first run: the healthy app
         self.analysis: dict | None = None
@@ -272,7 +274,7 @@ class Engine:
             original = await self.runner.snapshot()
             if self._expected is None:
                 self._expected = original
-            probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id)
+            probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id, poll_s=self._poll_s())
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
             probe.start()
@@ -407,6 +409,37 @@ class Engine:
             await self.clock.sleep(2.0)
             waited += 2.0
 
+    def _poll_s(self) -> float:
+        return 1.0 if self.runner.kind == "docker" else 0.5
+
+    # ---- status cache: Docker CLI calls take ~300 ms; never make the UI or the guard loop wait on them ------------
+    def _ensure_status_loop(self) -> None:
+        if self.runner.kind != "docker" or (self._status_task and not self._status_task.done()):
+            return
+
+        async def loop() -> None:
+            while True:
+                try:
+                    ready, detail = await self.runner.ready()
+                    svcs = await self.runner.services()
+                    self._status = {"ready": ready, "detail": detail, "services": svcs, "at": time.time()}
+                except Exception as err:  # Docker hiccup: keep the last view, say why
+                    if self._status:
+                        self._status["detail"] = f"status refresh failed: {err}"
+                await asyncio.sleep(1.0)
+
+        self._status_task = asyncio.create_task(loop())
+
+    async def _current_status(self) -> dict:
+        if self.runner.kind != "docker":
+            ready, detail = await self.runner.ready()
+            return {"ready": ready, "detail": detail, "services": await self.runner.services(), "at": time.time()}
+        self._ensure_status_loop()
+        if self._status is None or time.time() - self._status["at"] > 5:
+            ready, detail = await self.runner.ready()
+            self._status = {"ready": ready, "detail": detail, "services": await self.runner.services(), "at": time.time()}
+        return self._status
+
     def _enter(self, phase: str) -> None:
         """Move to a phase and remember it, so the UI never shows phases that did not run (e.g. after a refused start)."""
         self.phase = phase
@@ -428,7 +461,7 @@ class Engine:
 
     async def _tick(self, probe: Probe, t_begin: float, fault_s: float) -> None:
         probe.ensure_healthy()
-        self._services = await self.runner.services()
+        self._services = (await self._current_status())["services"]
         now = self.clock.now()  # Docker inspection itself can take time; never judge a stale wall clock
         # blast radius = services down or unhealthy that were not faulted on purpose
         on_purpose = self._targets if self.guard.armed else set()
@@ -440,7 +473,10 @@ class Engine:
         last = [u for u in probe.units if u.done is not None and now - 0.5 < u.done <= now]
         cur = self.current
         assert cur is not None
-        cur["timeline"].append({"t": round(now - self.t0, 2), "ok": sum(u.acked for u in last),
+        t_rel = round(now - self.t0, 2)
+        if cur["timeline"] and t_rel - cur["timeline"][-1]["t"] < 0.2:
+            cur["timeline"].pop()  # two loops can tick at the same instant (phase change): keep one point per moment
+        cur["timeline"].append({"t": t_rel, "ok": sum(u.acked for u in last),
                                 "err": sum(not u.acked for u in last), "p95_ms": round(w["p95_ms"], 1),
                                 "error_rate": round(w["error_rate"], 3), "unhealthy": unhealthy})
         cur["elapsed_s"] = round(now - self.t0, 1)
@@ -606,6 +642,18 @@ class Engine:
         from .sim import Clock
 
         self.twin = {"status": "running", "rows": [], "ran_at": time.time()}
+        try:
+            return await self._run_twin(speed)
+        finally:
+            if self.twin.get("status") == "running":
+                self.twin["status"] = "done"
+                self.twin["failed"] = self.twin.get("failed") or [{"experiment_id": "*", "title": "rehearsal",
+                                                                   "reason": self.error or "interrupted"}]
+
+    async def _run_twin(self, speed: float) -> dict:
+        from .runner import SimRunner
+        from .sim import Clock
+
         twin = Engine(self.target, SimRunner(self.target, Clock(speed)), rate=self.rate, persist=False)
         # the twin measures its own baseline, so the same "healthy baseline before any fault" gate applies to it
         started = time.perf_counter()
@@ -685,9 +733,10 @@ class Engine:
 
     # ---- state ---------------------------------------------------------------------------------------------
     async def state_json(self) -> dict:
-        ready, detail = await self.runner.ready()
+        st = await self._current_status()  # cached for Docker: /api/state answers in milliseconds
+        ready, detail = st["ready"], st["detail"]
         if not self.busy:
-            self._services = await self.runner.services()
+            self._services = st["services"]
         cur = None
         if self.current:
             seconds_left = 0.0
@@ -706,7 +755,8 @@ class Engine:
             "busy": self.busy,
             "current": cur,
             "results": self.results,
-            "campaign": self.campaign,
+            "campaign": {**self.campaign, "status": "stopped"} if self.campaign.get("status") == "running" and not self.busy
+            else self.campaign,  # never report a campaign as running when nothing runs
             "twin": self.twin,
             "plan": self.plan,
             "analysis": self.analysis,

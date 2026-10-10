@@ -154,7 +154,7 @@ export function Live({ state, target, catalog, onChange, connected, onTargetChan
           const done = reached && !isCurrent;
           return <li key={p.id} aria-current={isCurrent ? "step" : undefined} className={isCurrent ? "current" : done ? "complete" : ""}><span>{done ? "✓" : i + 1}</span>{p.label}</li>;
         })}</ol>
-        <button className="emergency-control" type="button" disabled={busyAction === "kill"} onClick={kill}><Square size={14} aria-hidden="true" />{busyAction === "kill" ? "Restoring…" : "Stop & restore"}</button>
+        {running && <button className="emergency-control" type="button" disabled={busyAction === "kill"} onClick={kill}><Square size={14} aria-hidden="true" />{busyAction === "kill" ? "Restoring…" : "Stop & restore"}</button>}
       </div>
 
       {(error || state.error) && (

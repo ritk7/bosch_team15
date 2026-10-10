@@ -363,3 +363,15 @@ def test_explanation_matches_parsed_restart_policy():
     p = agents.rules_prediction(exp, g, entry=t.entry, sync={"hawkbit", "mysql", "rabbitmq"}, rate=2, fault_s=6,
                                 history=[], unit_plural="devices")
     assert "no restart policy" not in p["reason"] and "always" in p["reason"]
+
+
+def test_hawkbit_map_is_derived_from_its_compose_settings():
+    """Cross-check: with no hand-written edges, the compose file alone yields hawkBit's two real data flows, and a
+    database merely named 'hawkbit' does not create a false arrow."""
+    from app import mapper
+
+    t = targets.load("hawkbit")
+    g = mapper.build_graph(t.compose_file(), roles=t.roles, extra_edges=[], notes={})
+    flows = {(e["from"], e["to"]) for e in g["edges"] if e["kind"] == "dataflow"}
+    assert flows == {("hawkbit", "mysql"), ("hawkbit", "rabbitmq")}
+    assert sorted(n["id"] for n in g["nodes"]) == ["hawkbit", "mysql", "rabbitmq"]

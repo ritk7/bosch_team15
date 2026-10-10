@@ -5,6 +5,7 @@ An optional fixes overlay (docker-compose.fixes.yml) is merged on top, so applie
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -33,13 +34,45 @@ def load_services(compose: Path, overlay: Path | None = None) -> dict[str, dict]
     return services
 
 
+def _settings(spec: dict) -> list[tuple[str, str]]:
+    """(key, value) pairs from environment (list or map form) and command/entrypoint."""
+    env = spec.get("environment") or {}
+    pairs = list(env.items()) if isinstance(env, dict) else [tuple(str(x).split("=", 1)) if "=" in str(x) else (str(x), "")
+                                                           for x in env]
+    pairs = [(str(k), str(v)) for k, v in pairs]
+    for k in ("command", "entrypoint"):
+        if spec.get(k):
+            pairs.append(("", str(spec[k])))
+    return pairs
+
+
 def build_graph(compose: Path, *, roles: dict[str, str] | None = None, extra_edges: list[dict] | None = None,
                 notes: dict[str, list[str]] | None = None, overlay: Path | None = None) -> dict:
     roles, notes = roles or {}, notes or {}
     services = load_services(compose, overlay)
     edges = [{"from": s, "to": d, "kind": "depends_on", "label": "starts after"}
              for s, spec in services.items() for d in _depends(spec) if d in services]
-    edges += [e for e in (extra_edges or []) if e["from"] in services and e["to"] in services]
+    # data flows the compose file reveals: a host-like setting (host/url/address key, //name, name:port, @name)
+    # naming another service. A database merely *named* like a service (MYSQL_DATABASE=hawkbit) does not count.
+    for src, spec in services.items():
+        for key, value in _settings(spec):
+            for dst in services:
+                if dst == src:
+                    continue
+                word = rf"(?<![\w-]){re.escape(dst)}(?![\w-])"
+                hosty = re.search(r"HOST|URL|URI|ADDR|SERVER|BROKER|ENDPOINT", key, re.I) and re.search(word, value)
+                urlish = re.search(rf"(//|@){re.escape(dst)}(?![\w-])|{word}:\d+", value)
+                if hosty or urlish:
+                    edges.append({"from": src, "to": dst, "kind": "dataflow", "label": f"{key or 'command'} points at {dst}"})
+                    break
+    known = {(e["from"], e["to"], e["kind"]) for e in edges}
+    for e in extra_edges or []:  # adapter knowledge from the app's source code (e.g. a hostname set in code)
+        if e["from"] in services and e["to"] in services:
+            derived = next((x for x in edges if x["from"] == e["from"] and x["to"] == e["to"] and x["kind"] == "dataflow"), None)
+            if derived and e["kind"] == "dataflow":  # confirmed by the compose file: keep both explanations
+                derived["label"] = f"{e['label']} ({derived['label']})"
+                continue
+            edges.append({**e, "label": e["label"] if "source" in e.get("label", "") else f"{e['label']} (from the app's source code)"})
 
     nodes = []
     for name, spec in services.items():
