@@ -99,6 +99,8 @@ async def apply(runner, exp: dict, probe=None) -> list[Cleanup]:
                 await _step(runner, action, svc)
 
         task = asyncio.create_task(later())
+        if probe is not None:
+            probe.monitor(task)
 
         async def cancel() -> None:
             task.cancel()

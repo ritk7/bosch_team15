@@ -9,6 +9,7 @@ interface Props {
   busy: boolean;
   onKill: () => void;
   killing: boolean;
+  restorationFailed?: boolean;
 }
 
 function Meter({ label, value, limit, text }: { label: string; value: number; limit: number; text: string }) {
@@ -28,19 +29,19 @@ function Meter({ label, value, limit, text }: { label: string; value: number; li
   );
 }
 
-export function GuardCard({ guard, last, wallS, phase, busy, onKill, killing }: Props) {
+export function GuardCard({ guard, last, wallS, phase, busy, onKill, killing, restorationFailed = false }: Props) {
   const th = guard?.thresholds ?? { error_rate: 0.6, p95_ms: 3000, unhealthy: 3, max_wall_s: 45 };
-  const status = guard?.tripped ? "Tripped" : guard?.armed ? "Armed" : busy ? "Standing by" : "Idle";
+  const status = restorationFailed ? "Restore failed" : guard?.tripped ? "Tripped" : guard?.armed ? "Armed" : busy ? "Standing by" : "Idle";
   const counting = phase === "observe" && guard?.armed && !guard.tripped;
   return (
-    <section aria-labelledby="guard-h" className="border border-rule bg-surface p-4">
+    <section aria-labelledby="guard-h" className="guard-card border border-rule bg-surface p-4">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="guard-h" className="wd-wide text-base font-semibold">Guard</h2>
         <span className={`text-sm font-semibold ${guard?.tripped ? "text-crit" : guard?.armed ? "text-cobalt" : "text-graphite"}`}>
           {status}
         </span>
       </div>
-      <p className="mt-1 text-[0.8rem] text-graphite">Plain code, not the model. Any limit reached stops the fault and restores every service.</p>
+      <p className="mt-1 text-[0.8rem] text-graphite">Plain code, not the model. A breached limit triggers restoration. Verify the result on the service map.</p>
 
       <div className="mt-3 flex min-h-[2rem] items-baseline gap-2" aria-live="polite">
         {counting ? (
@@ -49,12 +50,14 @@ export function GuardCard({ guard, last, wallS, phase, busy, onKill, killing }: 
             <span className="text-sm text-graphite">s left in the fault window</span>
           </>
         ) : (
-          <span className="text-sm text-graphite">No fault active.</span>
+          <span className={`text-sm ${restorationFailed ? "text-crit" : "text-graphite"}`}>
+            {restorationFailed ? "Restoration incomplete. Retry the kill switch." : phase === "restore" ? "Restoration in progress…" : phase === "inject" ? "Applying controlled fault…" : phase === "observe" && guard?.tripped ? "Safety limit reached; restoration pending." : "No fault active."}
+          </span>
         )}
       </div>
 
       {guard?.tripped && guard.reason && (
-        <p role="status" className="mt-3 border-l-2 border-crit pl-3 text-sm text-crit">{guard.reason}. Services restored.</p>
+        <p role="status" className="mt-3 border-l-2 border-crit pl-3 text-sm text-crit">{guard.reason}. {restorationFailed ? "Restoration failed; inspect service health and retry." : phase === "done" ? "Restore cycle complete; check service health." : "Check restoration progress on the map."}</p>
       )}
 
       <div className="mt-4 space-y-3">

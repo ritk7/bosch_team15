@@ -221,13 +221,34 @@ class HawkbitClient:
 
     async def _targets(self, prefix: str) -> list[dict] | None:
         try:
-            r = await self.http.get(f"{self.base}/rest/v1/targets", auth=MGMT_AUTH,
-                                    params={"q": f"controllerId=={prefix}*", "limit": 500})
-            if r.status_code != 200:
-                return None
-            return r.json().get("content", [])
+            rows: list[dict] = []
+            seen: set[str] = set()
+            while True:
+                r = await self.http.get(f"{self.base}/rest/v1/targets", auth=MGMT_AUTH,
+                                        params={"q": f"controllerId=={prefix}*", "limit": 500, "offset": len(rows)})
+                if r.status_code != 200:
+                    return None
+                body = r.json()
+                page = body.get("content", [])
+                ids = {t["controllerId"] for t in page}
+                if ids & seen:
+                    return None  # ignored pagination / changing page: do not claim truncated data proves loss
+                rows.extend(page)
+                seen.update(ids)
+                total = body.get("total")
+                if (total is not None and len(rows) >= total) or (total is None and len(page) < 500):
+                    return rows
+                if not page:
+                    return None
         except (httpx.HTTPError, ValueError):
             return None
+
+    async def observed_ids(self, prefix: str) -> tuple[set[str] | None, set[str] | None]:
+        rows = await self._targets(prefix)
+        if rows is None:
+            return None, None
+        return ({t["controllerId"] for t in rows if t.get("updateStatus") == "pending"},
+                {t["controllerId"] for t in rows if t.get("updateStatus") == "in_sync"})
 
     async def stored_ids(self, prefix: str) -> set[str] | None:
         rows = await self._targets(prefix)

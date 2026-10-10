@@ -121,7 +121,11 @@ export interface ExperimentResult {
   started_at: number;
   duration_s: number;
   label: string;
-  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number | null } | null;
+  fault_duration_s?: number;
+  fault_ended_s?: number | null;
+  configuration_signature?: string;
+  wall_s?: number | null;
   notes?: string[];
 }
 
@@ -205,7 +209,9 @@ export interface Current {
   prediction: Prediction | null;
   label: string;
   elapsed_s: number;
+  wall_s?: number | null;
   fault_duration_s: number;
+  fault_ended_s?: number | null;
   timeline: TimelinePoint[];
   fleet: VoteState[];
   guard: GuardView;
@@ -219,6 +225,7 @@ export interface Baseline {
 }
 
 export interface State {
+  target: string;
   runner: { kind: RunnerKind; ready: boolean; detail: string };
   services: ServiceStatus[];
   baseline: Baseline | null;

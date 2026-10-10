@@ -7,7 +7,7 @@ from . import config
 
 
 def _rec(v: float | None) -> str:
-    return "never (30 s cap)" if v is None else f"{v} s"
+    return "not observed (bounded recovery window)" if v is None else f"{v} s"
 
 
 def findings_report(engine) -> str:
@@ -46,7 +46,7 @@ def findings_report(engine) -> str:
             o, pe = r["outcome"], r.get("prediction_error")
             lines.append(f"| {r['experiment']['title']} | {r['label']} | {o['error_pct']}% | {o['lost']} | {_rec(o['recovery_s'])} | "
                          f"{'tripped: ' + (o['guard_reason'] or '') if o['guard_tripped'] else 'not needed'} | "
-                         f"{'—' if not pe else str(pe['errors_pct_points']) + ' pts, ' + str(pe['votes_lost']) + ' ' + u['plural'] + ', ' + str(pe['recovery_s']) + ' s'} |")
+                         f"{'—' if not pe else str(pe['errors_pct_points']) + ' pts, ' + str(pe['votes_lost']) + ' ' + u['plural'] + ', recovery ' + (str(pe['recovery_s']) + ' s' if o['recovery_s'] is not None and pe['recovery_s'] is not None else 'unavailable')} |")
             for n in r.get("notes", []):
                 lines.append(f"| ↳ {n} | | | | | | |")
         lines.append("")

@@ -31,7 +31,7 @@ def penalty(result: dict, fan_in: int) -> tuple[float, list[str]]:
     if o["lost"] > 0:
         parts.append((20 + 10 * min(1.0, o["lost"] / 50), f"{o['lost']} acknowledged units lost"))
     if o["recovery_s"] is None:
-        parts.append((25.0, "never recovered within 30 s"))
+        parts.append((25.0, "recovery not observed within the bounded window"))
     elif o["recovery_s"] > 10:
         parts.append((8 * min(1.0, (o["recovery_s"] - 10) / 20), f"slow recovery {o['recovery_s']} s"))
     if o["guard_tripped"]:

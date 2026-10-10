@@ -95,7 +95,10 @@ interface Outcome { sent: number; acked: number; stored: number; lost: number; e
 
 interface ExperimentResult { run_id: string; experiment: Experiment; prediction: Prediction | null; outcome: Outcome;
   timeline: TimelinePoint[]; fleet: VoteState[]; started_at: number; duration_s: number; label: string /* "before" | "after fix" | free text */;
-  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number | null /* unavailable when recovery wasn't observed */ } | null;
+  fault_duration_s?: number; fault_ended_s?: number | null; // new runs record requested duration and measured restore completion
+  configuration_signature?: string; // graph + probe rate + fault duration; only matching runs seed history-based predictions
+  wall_s?: number | null; // measured guard-clock elapsed time; absent in legacy results
   notes: string[] /* e.g. a secondary failure the final safety check repaired */; }
 
 interface Pick { experiment_id: string; reason: string; hypothesis: string; decided_by: Source; model: string; order: number; }
@@ -137,6 +140,7 @@ interface Score { value: number /* 0..100 */; breakdown: { name: string; points:
 ```ts
 interface ServiceStatus { id: string; state: ServiceState; health: "healthy" | "unhealthy" | "none"; restarts: number; cpu_pct: number | null; mem_mb: number | null; }
 interface State {
+  target: string;
   runner: { kind: RunnerKind; ready: boolean; detail: string };
   services: ServiceStatus[];
   baseline: { rps: number; error_pct: number; p95_ms: number } | null;
@@ -144,6 +148,8 @@ interface State {
   busy: boolean;                          // an experiment, re-run, campaign or twin rehearsal is in progress
   current: null | { run_id: string; experiment: Experiment; prediction: Prediction | null; label: string;
     elapsed_s: number; fault_duration_s: number; timeline: TimelinePoint[]; fleet: VoteState[];
+    wall_s?: number | null; // guard clock, including lead-in traffic; separate from elapsed_s since inject
+    fault_ended_s?: number | null; // measured seconds since inject; null until restored; absent in legacy snapshots
     guard: { armed: boolean; tripped: boolean; reason: string | null;
              thresholds: { error_rate: number; p95_ms: number; unhealthy: number; max_wall_s: number }; seconds_left: number };
     counters: { sent: number; acked: number; stored: number; lost: number; errors: number } };

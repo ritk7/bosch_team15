@@ -30,7 +30,7 @@ the database, and the worker then died on reconnect. An HTTP health check calls 
 
 ## Run it
 
-Needs Python 3.12+, Node 20+. Docker Desktop for the real targets.
+Needs Python 3.12+, Node 22.18+ (frontend tests use native TypeScript support). Docker Desktop for the real targets.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -65,7 +65,14 @@ rate, p95, guard, score, per-container CPU and memory from `docker stats`) and G
 docker compose -p observability -f docker-compose.observability.yml up -d   # Grafana: http://localhost:3000/d/chaos-sentinel
 ```
 
-Checks: `python dev.py check` (backend tests, type check, UI build).
+Checks: `python dev.py check` (backend tests, frontend chart regression tests, type check, UI build).
+
+Charts show errors on a fixed 0–100% scale and latency separately in seconds with an automatic range. A 100% rolling
+3-second error window does not mean every request in the entire run failed. Completed runs record the measured
+restoration time; older saved runs lack this timestamp and are not given invented fault shading. "Recovery not observed"
+means the probe did not establish five consecutive healthy units during the bounded recovery window, not proof that
+the application can never recover. Baselines are remeasured after restarts, fixes and resets.
+The cost ledger is persisted atomically in the git-ignored `backend/.cache/cost_ledger.json`; resetting the ledger is explicit.
 
 ## The demo (90 seconds)
 1. Live tab: click **redis** → **Pause worker, then crash redis**. The AI prediction appears; optionally type your own guess.
