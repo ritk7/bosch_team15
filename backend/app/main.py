@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, ledger, llm, state, targets
+from . import config, ledger, llm, report, state, targets
 from .campaign import Busy, Engine
 from .runner import make_runner
 
@@ -206,6 +207,26 @@ async def reset_demo() -> dict:
 @app.get("/api/state")
 async def get_state() -> dict:
     return await eng().state_json()
+
+
+@app.get("/api/report")
+def get_report() -> dict:
+    e = eng()
+    return {"markdown": report.findings_report(e), "score": e.analysis["score"] if e.analysis else None,
+            "score_history": e.score_history}
+
+
+@app.get("/api/report.md")
+def report_md() -> PlainTextResponse:
+    e = eng()
+    return PlainTextResponse(report.findings_report(e), media_type="text/markdown",
+                             headers={"Content-Disposition": f'attachment; filename="{e.target.name}-findings-report.md"'})
+
+
+@app.get("/api/architecture.md")
+def architecture_md() -> PlainTextResponse:
+    return PlainTextResponse(report.architecture(eng()), media_type="text/markdown",
+                             headers={"Content-Disposition": 'attachment; filename="architecture.md"'})
 
 
 @app.get("/api/snapshot")

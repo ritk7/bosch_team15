@@ -236,9 +236,22 @@ export interface State {
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
   score_history: { label: string; value: number; ts: number }[];
+  twin: null | { status: "running" | "done"; rows: TwinRow[]; ran_at: number; seconds?: number };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;
   error: string | null;
+}
+
+export interface TwinRow {
+  experiment_id: string;
+  title: string;
+  target: string;
+  type: FailureType;
+  penalty: number;
+  error_pct: number;
+  lost: number;
+  recovery_s: number | null;
+  guard_tripped: boolean;
 }
 
 export interface Health {
@@ -310,6 +323,11 @@ export const api = {
   applyFixes: (fix_ids: string[]) => post<{ ok: boolean; overlay: string; detail: string }>("/api/apply-fixes", { fix_ids }),
   rerun: (experiment_ids?: string[]) => post<{ ok: boolean; experiments: string[] }>("/api/rerun", { experiment_ids }),
   reset: () => post<{ ok: boolean; detail: string }>("/api/reset"),
+  startCampaign: (budget: number, strategy: "ai" | "random", seed?: number) =>
+    post<{ ok: boolean }>("/api/campaign/start", { budget, strategy, seed }),
+  stopCampaign: () => post<{ ok: boolean; restored: string[] }>("/api/campaign/stop"),
+  twin: () => post<{ ok: boolean }>("/api/twin"),
+  report: () => request<{ markdown: string; score: Score | null; score_history: { label: string; value: number; ts: number }[] }>("/api/report"),
   snapshot: () => request<State>("/api/snapshot"),
   ledger: () => request<{ summary: CostSummary; entries: LedgerEntry[] }>("/api/ledger"),
   resetLedger: () => request<{ ok: boolean }>("/api/ledger/reset", { method: "POST" }),

@@ -38,9 +38,9 @@ def _adapt(exp: dict, results: list[dict], graph: dict) -> tuple[float, str]:
                            "queued work survives a second failure")
                 break
     # diversify: a target that already showed its weakness is less informative
-    hurt = [r for r in done.values() if r["experiment"]["target"] == exp["target"] and score.penalty(r, 0)[0] > 20]
+    hurt = [r for r in done.values() if r["experiment"]["target"] == exp["target"] and score.penalty(r, 0)[0] > 10]
     if hurt:
-        prio -= 0.25
+        prio -= 0.3 * len(hurt)
         why.append(f"{exp['target']} already showed a weakness in {hurt[-1]['experiment']['id']}")
     return prio, "; ".join(why) or "covers a service not tested yet"
 
