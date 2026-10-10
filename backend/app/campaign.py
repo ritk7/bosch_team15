@@ -264,8 +264,11 @@ class Engine:
             measured_now = self.baseline is None
             if measured_now:
                 await self.measure_baseline()
-            if measured_now and unhealthy(self.baseline):
-                # e.g. a backlog from the previous experiment is still draining: give it time, measure once more
+            # a backlog from the previous experiment (e.g. 200 queued votes after the ghost-votes run) can still be
+            # draining: no errors, just units not stored yet. Give it up to ~1 minute; errors get a single retry.
+            tries = 0
+            while measured_now and unhealthy(self.baseline) and tries < (4 if self.baseline["error_pct"] == 0 else 1):
+                tries += 1
                 await self.clock.sleep(15.0)
                 await self.measure_baseline()
             if unhealthy(self.baseline):
