@@ -120,7 +120,8 @@ class Engine:
         if not snap or snap.get("target") != self.target.name or (snap.get("runner") or {}).get("kind") != self.runner.kind:
             return False
         # never pass old runs off as live: the UI shows when they were saved until the demo is reset or a new run starts
-        self.restored_from = snap.get("saved_at") or (snap.get("results") or [{}])[-1].get("started_at")
+        # only label restored runs if there are any (an empty saved session is not "old data")
+        self.restored_from = (snap.get("saved_at") or snap["results"][-1].get("started_at")) if snap.get("results") else None
         self.results = snap.get("results") or []
         self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
         self.applied_fixes = snap.get("applied_fixes") or []
