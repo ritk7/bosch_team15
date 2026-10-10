@@ -1,37 +1,81 @@
 # Chaos Sentinel
 
-An AI that stress-tests a Docker Compose app by breaking it on purpose, safely, then explains what it found and how to fix it.
-Built for the Bosch AI hackathon. Start with `CLAUDE.md`; the exact API is in `docs/CONTRACT.md`.
+**An AI that predicts what a failure will do, breaks your app safely behind a kill switch that is plain code, proves
+every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.**
 
-## Start
-```
+Bosch AI hackathon 2026 · Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nari, Akram Lateef, Tejas, Akhilesh K.
+
+Targets: Docker's open-source [example-voting-app](https://github.com/dockersamples/example-voting-app) (5 services) and
+Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-air update server (monolith + MySQL + RabbitMQ).
+
+## What it does
+
+    map ──► rehearse on a digital twin ──► plan (AI, with reasons) ──► predict ──► inject behind the guard
+         ──► measure every unit by id ──► restore ──► explain (ranked findings) ──► fix (engineer approves) ──► re-run
+
+| Bosch asks | Where it is |
+|---|---|
+| Map services, dependencies, data flows | Live tab map: compose file plus the data flows it does not declare; fan-in, single points of failure, restart policies |
+| Baseline monitoring | Measured before the first experiment: rate, error %, p95, units stored |
+| Failures with safety limits | Crash (true SIGKILL), hang, network cut, CPU throttle (overloaded database), traffic spike, compound failures. The guard trips on error rate ≥ 60% over 3 s, p95 ≥ 3 s, ≥ 3 services down, or > 45 s, then restores everything |
+| Intelligent planning | AI campaign planner with a reason per pick, adapting to measurements; digital twin rehearsal of the whole catalog in seconds; AI vs random computed (voting app: 3 runs vs 11.9 to find the top 3 weaknesses) |
+| Errors, slowdowns, recovery | Every run: error %, p95 and peak p95, recovery time, units lost silently, timeline and a 100-unit grid |
+| Findings, fixes, score | Ranked findings with measured evidence (the model may reword, never invent numbers), fixes with compose snippets, deterministic resilience score with breakdown |
+| Stretch goals | Live dashboard; combined failures (ghost votes); apply a fix and re-run: on real Docker the score went **57 → 74** after `restart: unless-stopped` |
+| Low cost | Rules first, small model second (Claude Haiku via an OpenAI-compatible router), response cache, cost ledger. Works with no model at all |
+
+**Ghost votes** (verified on real Docker): pause the worker, then crash Redis. 224 votes got HTTP 200; 24 never reached
+the database, and the worker then died on reconnect. An HTTP health check calls this healthy. We count lost votes by id.
+
+## Run it
+
+Needs Python 3.12+, Node 20+. Docker Desktop for the real targets.
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
-RUNNER=sim python dev.py   # simulation, no Docker needed. API :8000, UI :5173
-python dev.py check        # backend tests, type check, UI build
+RUNNER=sim python dev.py           # digital twin, no Docker needed. Open http://localhost:5173
 ```
-Open http://localhost:5173, click a service on the map, choose a failure, read the prediction, press "Confirm and inject".
 
-### Real Docker (the voting app)
-```
+Real voting app (8 GB laptop is fine, Docker memory 3-4 GB):
+
+```bash
 git clone https://github.com/dockersamples/example-voting-app targets/voting
-(cd targets/voting && docker compose up -d --build)   # first build 3-5 min; Docker Desktop memory 3-4 GB
-python dev.py selftest                                  # one real crash on redis, PASS/FAIL per step
-RUNNER=docker python dev.py                             # or RUNNER=auto: Docker when it answers, else simulation
+(cd targets/voting && docker compose up -d --build)     # first build 3-5 min
+python dev.py selftest                                    # one real crash, PASS/FAIL per step
+RUNNER=auto python dev.py                                 # Docker when the target runs, otherwise the twin
 ```
 
-### Models (optional; everything works on rules without them)
-Copy `backend/.env.example` to `backend/.env`. Any OpenAI-compatible router works for the small tier:
-`SMALL_PROVIDER=openai`, `SMALL_BASE_URL`, `SMALL_MODEL`, `SMALL_API_KEY`, `SMALL_USD_IN`, `SMALL_USD_OUT`. `.env` is git-ignored.
-Target app for the demo: `git clone https://github.com/dockersamples/example-voting-app targets/voting`
+Real Bosch hawkBit (16 GB+ machine): see [docs/HAWKBIT.md](docs/HAWKBIT.md).
 
-## What works (Milestone 1, verified on Docker and in simulation)
-Dependency map from the compose file plus undeclared data flows; probe that checks every vote by id in the database; crash
-experiment on any service; deterministic guard (error rate, p95, blast radius, wall time) that stops the fault and restores
-every service; kill switch; restore of an interrupted fault on startup; prediction before each run (rules, or a model when
-configured) and predicted-vs-measured reveal; Live view and Cost view. The simulation follows the voting app's source code.
+Optional models: copy `backend/.env.example` to `backend/.env` and set `SMALL_PROVIDER=openai`, `SMALL_BASE_URL`,
+`SMALL_MODEL`, `SMALL_API_KEY` (any OpenAI-compatible router), or `ANTHROPIC_API_KEY`. `.env` is git-ignored.
 
-`python dev.py selftest` passes on the real voting app (Docker 29.8, M2 Mac): baseline 25/25 votes stored, redis
-killed, guard tripped on p95 latency (votes hang while Redis is gone), every service restored, recovery measured.
+CI gate (fails the pipeline below a resilience score):
 
-Not built yet: more failure types, findings, score, fixes, campaign, report.
+```bash
+cd backend && python -m app.cli gate --min-score 80 --budget 5 [--target hawkbit]
+```
+
+Checks: `python dev.py check` (backend tests, type check, UI build).
+
+## The demo (90 seconds)
+1. Live tab: click **redis** → **Pause worker, then crash redis**. The AI prediction appears; optionally type your own guess.
+2. **Confirm and inject**: the worker freezes, Redis dies, units pile up in red on the map, the grid fills amber.
+3. The guard trips and restores; the reveal shows predicted vs measured, and your guess against the AI. Votes lost silently.
+4. Findings tab: **Analyse runs** → ranked weaknesses and score → tick the restart fix → **Approve and apply** → **Re-run**: score rises.
+5. Campaign tab: **Rehearse all on the twin** (heatmap in seconds), AI planner against random.
+6. Header: switch the target to **Bosch hawkBit update server**: same tool, Bosch's own OTA server; units become devices.
+
+## Layout
+`backend/app`: `mapper.py` (graph), `probe.py` (units by id), `guard.py` (kill switch), `injectors.py` (failures),
+`campaign.py` (engine), `planner.py`, `analysis.py`, `score.py`, `fixes.py`, `report.py`, `cli.py`, `runner.py` and
+`docker_runner.py` (sim and Docker), `targets/` (voting, hawkBit adapters and twins). `frontend/src`: Live, Campaign,
+Findings, Report, Cost views. Docs: [architecture](docs/CONTRACT.md), [timeline](docs/TIMELINE.md), [demo](docs/DEMO.md).
+
+## Verified, and not
+- Verified on real Docker (voting app, M2 Mac, Docker 29.8): selftest, crash, ghost votes, guard trips and restores,
+  fix and re-run 57 → 74, restore after the tool itself restarts mid-fault.
+- hawkBit: built from hawkBit's source and docs and tested on its twin; real-server verification is
+  `python dev.py selftest --target hawkbit` on a 16 GB+ machine.
+- Not built: network latency/packet loss injection (needs a privileged netem helper), disk-full, Kubernetes.
