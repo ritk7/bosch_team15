@@ -144,15 +144,34 @@ class SimHawkbit:
 class HawkbitClient:
     """Real devices against a real hawkBit: management API to create and assign, DDI to poll and report success."""
 
-    def __init__(self, base_url: str = "http://localhost:8080", timeout_s: float = 5.0):
+    def __init__(self, base_url: str = "http://localhost:8080", timeout_s: float = 15.0):
+        # hawkBit's amd64 image runs under emulation on Apple Silicon: allow slower answers than the voting app
         self.base = base_url
         self.http = httpx.AsyncClient(timeout=timeout_s)
         self.ds_id: int | None = None
+
+    async def wait_ready(self, max_s: float = 240.0) -> None:
+        """The JVM accepts connections long before the REST API answers; wait until the management API responds."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max_s
+        last = ""
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            while loop.time() < deadline:
+                try:
+                    r = await http.get(f"{self.base}/rest/v1/targets", params={"limit": 1}, auth=MGMT_AUTH)
+                    if r.status_code == 200:
+                        return
+                    last = f"HTTP {r.status_code}"
+                except httpx.HTTPError as err:
+                    last = type(err).__name__
+                await asyncio.sleep(3)
+        raise RuntimeError(f"hawkBit management API not ready after {max_s:.0f} s ({last})")
 
     async def prepare(self) -> None:
         """Idempotent: enable TargetToken auth for devices, then create one software module and one distribution set."""
         if self.ds_id is not None:
             return
+        await self.wait_ready()
         r = await self.http.put(f"{self.base}/rest/v1/system/configs/authentication.targettoken.enabled",
                                 json={"value": True}, auth=MGMT_AUTH)
         r.raise_for_status()
