@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .. import mapper
+from .. import config, mapper
 from ..sim import Clock, SimVoting
 
 EMBEDDED = Path(__file__).with_name("voting.compose.yml")
@@ -73,15 +73,24 @@ class VotingTarget:
         cloned = self.target_dir / "docker-compose.yml"
         return cloned if cloned.exists() else EMBEDDED
 
+    def state_dir(self) -> Path:
+        """Where approved fixes and map corrections live: next to the compose file when the app is cloned, otherwise
+        in the tool's own data folder (creating targets/<name> would make setup.sh think the app is already cloned)."""
+        if (self.target_dir / "docker-compose.yml").exists():
+            return self.target_dir
+        d = config.CACHE_DIR / self.name
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
     def overlay_file(self) -> Path:
-        return self.target_dir / "docker-compose.fixes.yml"
+        return self.state_dir() / "docker-compose.fixes.yml"
 
     def graph_services(self) -> dict[str, dict]:
         return mapper.load_services(self.compose_file(), self.overlay_file())
 
     def graph(self) -> dict:
         return mapper.build_graph(self.compose_file(), roles=self.roles,
-                                  extra_edges=mapper.corrected_edges(self.target_dir, self.extra_edges),
+                                  extra_edges=mapper.corrected_edges(self.state_dir(), self.extra_edges),
                                   notes=self.notes, overlay=self.overlay_file())
 
     def extra_experiments(self, graph: dict) -> list[dict]:

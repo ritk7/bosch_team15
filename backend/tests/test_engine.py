@@ -202,12 +202,13 @@ def test_db_overload_and_restore():
     assert r is not None and after == original
 
 
-def test_manual_map_correction(tmp_path):
-    from app import mapper
+def test_manual_map_correction(tmp_path, monkeypatch):
+    from app import config, mapper
 
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
     t = targets.load("voting")
-    t.target_dir = tmp_path
-    mapper.save_corrections(tmp_path, {"add": [{"from": "result", "to": "redis", "label": "debug read"}],
+    t.target_dir = tmp_path / "not-cloned"
+    mapper.save_corrections(t.state_dir(), {"add": [{"from": "result", "to": "redis", "label": "debug read"}],
                                        "remove": [("worker", "db")]})
     pairs = {(e["from"], e["to"]) for e in t.graph()["edges"] if e["kind"] == "dataflow"}
     assert ("result", "redis") in pairs and ("worker", "db") not in pairs
@@ -234,3 +235,16 @@ def test_planner_number_check_allows_rounding_but_not_invention():
     assert numbers_ok("risk 0.85, 22 votes lost, about 8 s", src)
     assert numbers_ok("85% risk", src)
     assert not numbers_ok("90% error rate", src)
+
+
+def test_fixes_and_map_corrections_work_without_a_cloned_app(tmp_path, monkeypatch):
+    """Fresh clone in simulation mode: targets/voting does not exist. Saving must not create it (setup.sh would then
+    skip cloning) and must not crash."""
+    from app import config
+    from app.targets.voting import VotingTarget
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
+    missing = tmp_path / "targets" / "voting"
+    t = VotingTarget(missing)
+    assert VotingTarget.state_dir(t) == tmp_path / "cache" / "voting"
+    assert not missing.exists()

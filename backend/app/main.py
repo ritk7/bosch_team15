@@ -197,7 +197,7 @@ async def edit_edge(body: dict = Body(...)) -> dict:
     ids = {n["id"] for n in e.graph["nodes"]}
     if src not in ids or dst not in ids or src == dst:
         raise HTTPException(422, "from and to must be two different services of the target")
-    c = mapper.load_corrections(e.target.target_dir)
+    c = mapper.load_corrections(e.target.state_dir())
     c["add"] = [x for x in c["add"] if (x["from"], x["to"]) != (src, dst)]
     c["remove"] = [x for x in c["remove"] if x != (src, dst)]
     if action == "add":
@@ -206,7 +206,7 @@ async def edit_edge(body: dict = Body(...)) -> dict:
         c["remove"].append((src, dst))
     else:
         raise HTTPException(422, "action must be add or remove")
-    mapper.save_corrections(e.target.target_dir, c)
+    mapper.save_corrections(e.target.state_dir(), c)
     e.refresh_graph()
     return {"ok": True, "graph": e.graph}
 
