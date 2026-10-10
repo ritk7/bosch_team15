@@ -120,7 +120,7 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
         <div>
           <h1 className="wd-wide text-[1.45rem] leading-tight font-semibold sm:text-[1.75rem]">Break one service on purpose</h1>
-          <p className="mt-1 max-w-[70ch] text-graphite">
+          <p data-stage-hide className="mt-1 max-w-[70ch] text-graphite">
             Pick a service on the map and a failure. The planner commits to a prediction first, the guard keeps the damage
             inside limits, and every number below is measured from real probe {unit.plural}.
           </p>
@@ -167,7 +167,7 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
             />
           </section>
 
-          <MapEditor target={target} disabled={running} onChange={onTargetChange} />
+          <div data-stage-hide><MapEditor target={target} disabled={running} onChange={onTargetChange} /></div>
 
           <section aria-labelledby="choose-h" className="border border-rule bg-surface p-4">
             <h2 id="choose-h" className="wd-wide text-base font-semibold">
@@ -299,7 +299,7 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
         </div>
       </div>
 
-      {state.results.length > 0 && <History results={state.results} unit={target.unit} />}
+      {state.results.length > 0 && <div data-stage-hide><History results={state.results} unit={target.unit} /></div>}
     </div>
   );
 }

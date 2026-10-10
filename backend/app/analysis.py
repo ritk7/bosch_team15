@@ -2,6 +2,7 @@
 reword titles, impact and steps. Its answer is rejected if it changes ids or cites a number that is not in the evidence."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -90,11 +91,12 @@ async def findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
         return True
 
     try:
-        res = await llm.complete("risk", prompt, system=system, max_tokens=900, min_tier="small", accept=accept)
+        res = await asyncio.wait_for(llm.complete("risk", prompt, system=system, max_tokens=900, min_tier="small",
+                                                  accept=accept), 45)
         for r in (llm.extract_json(res.text) or {})["findings"]:
             by_id[r["id"]]["title"], by_id[r["id"]]["impact"] = str(r["title"]).strip(), str(r["impact"]).strip()
         return base, res.source, res.model
-    except llm.NoModelAvailable:
+    except (llm.NoModelAvailable, asyncio.TimeoutError):
         ledger.record_rule(task="risk", tokens_in=ledger.estimate_tokens(system + prompt),
                            tokens_out=ledger.estimate_tokens(json.dumps(base)))
         return base, "rules", "rules engine"
@@ -182,12 +184,13 @@ async def recommend(found: list[dict], results: list[dict], graph: dict) -> tupl
                 and all(isinstance(r.get("steps"), list) and 1 <= len(r["steps"]) <= 4 for r in rows))
 
     try:
-        res = await llm.complete("fix", prompt, system=system, max_tokens=700, min_tier="small", accept=accept)
+        res = await asyncio.wait_for(llm.complete("fix", prompt, system=system, max_tokens=700, min_tier="small",
+                                                  accept=accept), 45)
         steps = {r["id"]: [str(s) for s in r["steps"]] for r in (llm.extract_json(res.text) or {})["fixes"]}
         for x in fixes:
             x["steps"] = steps[x["id"]]
         return fixes, res.source, res.model
-    except llm.NoModelAvailable:
+    except (llm.NoModelAvailable, asyncio.TimeoutError):
         ledger.record_rule(task="fix", tokens_in=ledger.estimate_tokens(system + prompt),
                            tokens_out=ledger.estimate_tokens(json.dumps(fixes)))
         return fixes, "rules", "rules engine"

@@ -26,6 +26,23 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("live");
   const [targets, setTargets] = useState<{ name: string; title: string }[]>([]);
   const [switching, setSwitching] = useState(false);
+  const [stage, setStage] = useState(false);
+
+  // Stage mode: bigger type for a projector, explanations hidden. Toggle with the button or the S key.
+  useEffect(() => {
+    document.documentElement.style.fontSize = stage ? "18.5px" : "";
+    document.documentElement.classList.toggle("stage", stage);
+  }, [stage]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (e.key.toLowerCase() === "s" && !e.metaKey && !e.ctrlKey && !["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName)) {
+        setStage((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const loadTarget = useCallback(() => {
     api.target().then(setTarget).catch(() => setOffline(true));
@@ -115,8 +132,13 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div className="ml-auto">
-            <TierStatus health={health} offline={offline} />
+          <div className="ml-auto flex items-center gap-4">
+            <button type="button" onClick={() => setStage((v) => !v)} aria-pressed={stage}
+              title="Stage mode: bigger text for a projector (key S)"
+              className={`border px-2 py-1 text-[0.8rem] ${stage ? "border-cobalt text-cobalt" : "border-rule text-graphite hover:text-ink"}`}>
+              Stage mode
+            </button>
+            <span data-stage-hide><TierStatus health={health} offline={offline} /></span>
           </div>
         </div>
       </header>

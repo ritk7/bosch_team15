@@ -4,6 +4,7 @@ Milestone 1 has the planner's predict step; pick, risk and fix arrive with later
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 from . import ledger, llm
@@ -88,19 +89,21 @@ async def predict(exp: dict, graph: dict, *, entry: str, sync: set[str], rate: f
     rules = rules_prediction(exp, graph, entry=entry, sync=sync, rate=rate, fault_s=fault_s, history=history,
                              unit_plural=unit_plural)
     past = [{"id": r["experiment"]["id"], "error_pct": r["outcome"]["error_pct"], "lost": r["outcome"]["lost"],
-             "recovery_s": r["outcome"]["recovery_s"]} for r in history[-6:]]
+             "recovery_s": r["outcome"]["recovery_s"]} for r in history[-4:]]
     prompt = json.dumps({"experiment": {k: exp[k] for k in ("id", "type", "target", "description")},
                          "graph": _compact(graph), "entry": entry, "probe_rate_per_s": rate, "fault_s": fault_s,
                          "guard": "stops the fault when error rate over 3 s >= 60% or p95 >= 3 s",
                          "baseline": baseline, "past_runs": past}, separators=(",", ":"))
     try:
-        res = await llm.complete("predict", prompt, system=SYSTEM, max_tokens=300, min_tier="small", accept=_accept)
+        # a slow model must never stall the demo: past 15 s the rules prediction is used
+        res = await asyncio.wait_for(llm.complete("predict", prompt, system=SYSTEM, max_tokens=220, min_tier="small",
+                                                  accept=_accept), 15)
         d = llm.extract_json(res.text) or {}
         p = {"expected_error_pct": round(float(d["expected_error_pct"])), "expected_votes_lost": int(d["expected_votes_lost"]),
              "expected_recovery_s": round(float(d["expected_recovery_s"]), 1), "confidence": d["confidence"],
              "reason": str(d["reason"]).strip().rstrip("."), "hypothesis": str(d["hypothesis"]).strip()}
         source, model = res.source, res.model
-    except llm.NoModelAvailable:
+    except (llm.NoModelAvailable, asyncio.TimeoutError):
         ledger.record_rule(task="predict", tokens_in=ledger.estimate_tokens(SYSTEM + prompt),
                            tokens_out=ledger.estimate_tokens(json.dumps(rules)))
         p, source, model = rules, "rules", "rules engine"

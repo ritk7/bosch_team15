@@ -59,6 +59,17 @@ class Svc:
     restart_at: float | None = None
     backoff: float = 0.1
     died_at: float | None = None
+    net: str | None = None  # tc netem spec, e.g. "delay 500ms" or "loss 25%"
+
+    def delay_s(self) -> float:
+        if self.net and "delay" in self.net:
+            return int(self.net.split("delay ")[1].split("ms")[0]) / 1000
+        return 0.0
+
+    def loss(self) -> float:
+        if self.net and "loss" in self.net:
+            return int(self.net.split("loss ")[1].split("%")[0]) / 100
+        return 0.0
 
 
 @dataclass
@@ -148,6 +159,7 @@ class SimVoting:
         # a throttled worker loops slower; a throttled (overloaded) database makes each INSERT slower
         db_slow = self._slow("db")
         nxt = t + WORKER_TICK_S * self._slow("worker") + WORKER_WORK_S * (1 if db_slow == 1 else 20 * db_slow)
+        nxt += 2 * (self.svcs["redis"].delay_s() + self.svcs["db"].delay_s())
         if not self.svcs["worker"].connected:  # no DNS: OpenDbConnection keeps waiting, the loop throws
             if self._worker_ready:
                 return self._exit("worker", t)
@@ -206,6 +218,11 @@ class SimVoting:
             return "wait", None, 0.0
         load = 1 + max(0, self.inflight - 6) * 0.08  # Flask dev server: latency grows with concurrent requests
         base = (0.006 + self.rng.random() * 0.006) * self._slow("vote") * load
+        rs = self.svcs["redis"]
+        # measured: +400 ms netem on redis made a fresh vote->redis round trip ~2.5 s (DNS, connect, command)
+        base += 6 * rs.delay_s()
+        if rs.loss() and self.rng.random() < rs.loss():
+            base += 1.0 if self.rng.random() > rs.loss() else 5.0  # TCP retransmit; sometimes the 5 s timeout
         r = self.reach("redis", t)
         if r == "down" and not self.svcs["redis"].connected:
             return "done", 500, base  # name resolves to nothing reachable: fails fast

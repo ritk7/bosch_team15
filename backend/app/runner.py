@@ -32,7 +32,7 @@ class Runner(Protocol):
 
 def differs(now: dict, want: dict) -> bool:
     return (now["state"] != want["state"] or now["connected"] != want["connected"]
-            or now.get("cpus") != want.get("cpus"))
+            or now.get("cpus") != want.get("cpus") or now.get("net") != want.get("net"))
 
 
 class SimRunner:
@@ -74,8 +74,8 @@ class SimRunner:
 
     async def snapshot(self) -> dict[str, dict]:
         self.app.advance()
-        return {n: {"state": "running" if s.state == "restarting" else s.state, "connected": s.connected, "cpus": s.cpus}
-                for n, s in self.app.svcs.items() if n in self.allowed}
+        return {n: {"state": "running" if s.state == "restarting" else s.state, "connected": s.connected, "cpus": s.cpus,
+                    "net": s.net} for n, s in self.app.svcs.items() if n in self.allowed}
 
     async def crash(self, svc: str) -> None:
         self._check(svc)
@@ -105,6 +105,12 @@ class SimRunner:
         self._check(svc)
         self.app.set_cpus(svc, cpus)
 
+    async def set_net(self, svc: str, spec: str | None) -> None:
+        """Simulated tc netem: 'delay 500ms' and/or 'loss 25%' on everything this service sends."""
+        self._check(svc)
+        self.app.advance()
+        self.app.svcs[svc].net = spec
+
     async def restore_all(self, original: dict[str, dict], order: list[str]) -> list[str]:
         """Bring every service back to its recorded state, dependencies first, and wait until they answer."""
         restored: list[str] = []
@@ -119,6 +125,8 @@ class SimRunner:
                 await (self.connect(name) if want["connected"] else self.disconnect(name))
             if now.get("cpus") != want.get("cpus"):
                 await self.set_cpus(name, want.get("cpus"))
+            if now.get("net") != want.get("net"):
+                await self.set_net(name, want.get("net"))
             if now["state"] == "paused" and want["state"] == "running":
                 await self.unpause(name)
             elif now["state"] in ("stopped", "restarting") and want["state"] == "running":

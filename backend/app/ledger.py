@@ -35,6 +35,29 @@ class Entry:
 
 _entries: list[Entry] = []
 _lock = threading.Lock()
+LEDGER_FILE = config.CACHE_DIR / "ledger.json"  # so the Cost view survives a restart of the tool
+
+
+def _load() -> None:
+    import json
+
+    try:
+        rows = json.loads(LEDGER_FILE.read_text(encoding="utf-8"))
+        _entries.extend(Entry(**r) for r in rows[-5000:])
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def _save() -> None:
+    import json
+
+    try:
+        LEDGER_FILE.write_text(json.dumps([asdict(e) for e in _entries]), encoding="utf-8")
+    except OSError:
+        pass
+
+
+_load()
 
 
 def estimate_tokens(text: str) -> int:
@@ -77,6 +100,7 @@ def record(
     with _lock:
         _entries.append(entry)
         del _entries[:-5000]
+        _save()
     return entry
 
 
@@ -138,3 +162,4 @@ def entries(limit: int = 300) -> list[dict]:
 def reset() -> None:
     with _lock:
         _entries.clear()
+        _save()

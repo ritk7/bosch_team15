@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from http.cookiejar import CookieJar, DefaultCookiePolicy
 import shutil
 from pathlib import Path
@@ -16,6 +17,7 @@ import httpx
 from .sim import Clock
 
 HELPER_IMAGE = "alpine:3.20"  # only used to deliver SIGKILL to one process of the target project
+NETEM_IMAGE = "nicolaka/netshoot:v0.13"  # tc/netem, run inside one target container's network namespace only
 COMPOSE_STATE = {"running": "running", "exited": "stopped", "dead": "stopped", "created": "stopped",
                  "paused": "paused", "restarting": "restarting", "removing": "stopped"}
 
@@ -110,6 +112,7 @@ class DockerRunner:
         self.depended_on = {n["id"] for n in graph["nodes"] if n["fan_in"] > 0}
         self.connected: dict[str, bool] = {s: True for s in self.allowed}
         self.cpus: dict[str, float | None] = {s: None for s in self.allowed}
+        self.net: dict[str, str | None] = {s: None for s in self.allowed}
         self._client: DockerClient | None = None
         self._stats: dict[str, tuple[float, float]] = {}  # container name -> (cpu %, memory MiB), from docker stats
         self._stats_at = 0.0
@@ -205,7 +208,7 @@ class DockerRunner:
     async def snapshot(self) -> dict[str, dict]:
         rows = {r.get("Service"): r for r in await self._ps()}
         return {s: {"state": COMPOSE_STATE.get((rows.get(s) or {}).get("State", "exited"), "stopped"),
-                    "connected": self.connected[s], "cpus": self.cpus[s]} for s in self.allowed}
+                    "connected": self.connected[s], "cpus": self.cpus[s], "net": self.net[s]} for s in self.allowed}
 
     async def crash(self, svc: str) -> None:
         """SIGKILL the container's main process, as an OOM kill or segfault would (exit 137).
@@ -265,6 +268,21 @@ class DockerRunner:
             raise RuntimeError(f"docker update failed: {err.strip()[:200]}")
         self.cpus[svc] = cpus
 
+    async def set_net(self, svc: str, spec: str | None) -> None:
+        """Slow or lossy network: tc netem on every interface of this one container (e.g. 'delay 500ms', 'loss 25%').
+        The helper joins only that container's network namespace; None removes the rule."""
+        self._check(svc)
+        container = await self._container(svc)
+        if spec and not re.fullmatch(r"(delay \d+ms ?)?(loss \d+%)?", spec.strip()):
+            raise ValueError(f"Refusing netem spec '{spec}'")
+        rule = f"tc qdisc replace dev $i root netem {spec}" if spec else "tc qdisc del dev $i root 2>/dev/null || true"
+        script = f"for i in $(ls /sys/class/net | grep -v '^lo$'); do {rule}; done"
+        code, _, err = await self.exe([self.docker, "run", "--rm", "--net", f"container:{container}", "--cap-add",
+                                       "NET_ADMIN", NETEM_IMAGE, "sh", "-c", script], 60.0)
+        if code != 0:
+            raise RuntimeError(f"netem failed on {svc}: {err.strip()[:200]}")
+        self.net[svc] = spec
+
     async def _wait_up(self, svc: str, max_s: float = 25.0) -> None:
         """Wait until the service runs, and until it is healthy when other services depend on it."""
         waited, exited = 0.0, 0
@@ -295,6 +313,8 @@ class DockerRunner:
                 await (self.connect(name) if want["connected"] else self.disconnect(name))
             if now.get("cpus") != want.get("cpus"):
                 await self.set_cpus(name, want.get("cpus"))
+            if now.get("net") != want.get("net") and now["state"] == "running":
+                await self.set_net(name, want.get("net"))
             if now["state"] == "paused" and want["state"] == "running":
                 await self.unpause(name)
             elif now["state"] in ("stopped", "restarting") and want["state"] == "running":

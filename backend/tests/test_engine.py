@@ -211,3 +211,17 @@ def test_manual_map_correction(tmp_path):
                                        "remove": [("worker", "db")]})
     pairs = {(e["from"], e["to"]) for e in t.graph()["edges"] if e["kind"] == "dataflow"}
     assert ("result", "redis") in pairs and ("worker", "db") not in pairs
+
+
+def test_latency_and_packet_loss_are_injected_and_removed():
+    async def go():
+        e = make_engine()
+        original = await e.runner.snapshot()
+        r1 = await e.run("tlat", e.experiment("latency-redis"), "before", 5.0)
+        mid = await e.runner.snapshot()
+        r2 = await e.run("tloss", e.experiment("packet-loss-redis"), "before", 5.0)
+        return r1, r2, original, mid, await e.runner.snapshot()
+
+    r1, r2, original, mid, after = run(go())
+    assert r1["outcome"]["peak_p95_ms"] > 2000  # +500 ms per round trip on the vote -> redis path
+    assert mid == original and after == original and original["redis"]["net"] is None

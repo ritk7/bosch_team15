@@ -76,3 +76,8 @@ body {
     animation-duration: 0.01ms !important;
   }
 }
+
+/* Stage mode (projector): hide explanatory copy, keep the instruments. */
+.stage [data-stage-hide] {
+  display: none;
+}

@@ -17,6 +17,8 @@ TEXT = {
     "network_cut": ("Cut {t} off the network", "Disconnect {t} from the project's networks; it keeps running and keeps its memory."),
     "cpu_throttle": ("Throttle {t} to {cpus} CPU", "Limit {t} to {cpus} of a CPU (docker update --cpus), like an overloaded host."),
     "traffic_spike": ("Traffic spike on {t} ({multiplier}×)", "Send {multiplier} times the normal probe rate to {t} for the fault window."),
+    "latency": ("Slow network on {t} (+{ms} ms)", "Add {ms} ms of delay to everything {t} sends (tc netem), like a congested link."),
+    "packet_loss": ("Lossy network on {t} ({pct}% loss)", "Drop {pct}% of the packets {t} sends (tc netem); TCP retries, requests slow down or time out."),
     "db_overload": ("Overload {t} (heavy queries + {cpus} CPU)", "Flood {t} with {workers} parallel heavy queries while limiting it to {cpus} CPU, like a runaway report job."),
 }
 
@@ -52,6 +54,8 @@ def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[d
             out.append(_exp("hang", node, max_fan, sync, entry))
         if node["stateful"] and node["fan_in"] > 0:
             out.append(_exp("network_cut", node, max_fan, sync, entry))
+            out.append(_exp("latency", node, max_fan, sync, entry, ms=500))
+            out.append(_exp("packet_loss", node, max_fan, sync, entry, pct=25))
         if node["role"] in ("database", "worker"):
             out.append(_exp("cpu_throttle", node, max_fan, sync, entry, cpus=0.1))
         if node["id"] == db_load:
@@ -103,6 +107,10 @@ async def apply(runner, exp: dict, probe=None) -> list[Cleanup]:
         await runner.disconnect(t)
     elif kind == "cpu_throttle":
         await runner.set_cpus(t, float(p.get("cpus", 0.1)))
+    elif kind == "latency":
+        await runner.set_net(t, f"delay {int(p.get('ms', 500))}ms")  # removed by restore_all
+    elif kind == "packet_loss":
+        await runner.set_net(t, f"loss {int(p.get('pct', 25))}%")
     elif kind == "db_overload":
         await runner.set_cpus(t, float(p.get("cpus", 0.5)))  # restored by restore_all
         return [await runner.load(t, int(p.get("workers", 4)))]

@@ -89,3 +89,13 @@ def test_restore_starts_stopped_services_dependencies_first():
     assert asyncio.run(go()) == ["redis", "worker"]
     starts = [c[-1] for c in fake.calls if "start" in c]
     assert starts == ["redis", "worker"]
+
+
+def test_netem_runs_only_in_the_target_container_namespace():
+    r, fake = make()
+    asyncio.run(r.set_net("redis", "delay 500ms"))
+    run_call = next(c for c in fake.calls if c[1] == "run")
+    assert run_call[2:8] == ["--rm", "--net", "container:voting-redis-1", "--cap-add", "NET_ADMIN", "nicolaka/netshoot:v0.13"]
+    assert "netem delay 500ms" in run_call[-1]
+    with pytest.raises(ValueError):
+        asyncio.run(r.set_net("redis", "delay 5ms; rm -rf /"))

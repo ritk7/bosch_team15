@@ -81,6 +81,10 @@ class SimHawkbit:
             return "wait", None, 0.0
         load = 1 + max(0, self.inflight - 10) * 0.05
         latency = (0.05 + self.rng.random() * 0.03) * self._slow("hawkbit") * max(1.0, self._slow("mysql") / 3) * load
+        ms = self.svcs["mysql"]
+        latency += 8 * ms.delay_s()  # several queries per device update, each a round trip
+        if ms.loss() and self.rng.random() < ms.loss():
+            latency += 1.0
         self.synced.add(device_id)
         return "done", 200, latency
 
