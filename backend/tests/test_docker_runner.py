@@ -17,8 +17,8 @@ class FakeExec:
 
     async def __call__(self, args: list[str], timeout: float = 60.0):
         self.calls.append(args)
-        if args[1:3] == ["inspect", "-f"]:  # container start time: changes once the process was signalled
-            return 0, f"running {sum(1 for c in self.calls if 'kill -TERM 1' in c)}", ""
+        if args[1:3] == ["inspect", "-f"]:
+            return 0, "4242", ""
         if "ps" in args:
             return 0, "\n".join(json.dumps(r) for r in self.ps_rows), ""
         return 0, "", ""
@@ -50,9 +50,9 @@ def test_commands_are_scoped_to_the_project():
     compose = [c[len(prefix):] for c in fake.calls if c[:2] == ["docker", "compose"]]
     assert all(c[: len(prefix)] == prefix for c in fake.calls if c[:2] == ["docker", "compose"])
     actions = [c for c in compose if c[0] != "ps"]
-    # crash = signal PID 1 inside the container, so a restart policy can fire (docker kill counts as a manual stop)
-    assert actions == [["exec", "-T", "redis", "sh", "-c", "kill -TERM 1"], ["start", "redis"], ["pause", "worker"],
-                       ["unpause", "worker"]]
+    assert actions == [["start", "redis"], ["pause", "worker"], ["unpause", "worker"]]
+    # crash = SIGKILL of exactly this container's process (pid from inspect), so a restart policy can still fire
+    assert ["docker", "run", "--rm", "--privileged", "--pid=host", "alpine:3.20", "kill", "-9", "4242"] in fake.calls
 
 
 def test_business_check_commands():

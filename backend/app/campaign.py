@@ -160,7 +160,17 @@ class Engine:
             await probe.close()
             await self._tick(probe, t_begin, fault_s)
 
+            # final safety check: a service can fail after the fault is gone (e.g. on reconnect). Restart it and report it.
+            notes: list[str] = []
+            after = await self.runner.snapshot()
+            broken = [n for n in self.order if n in original and differs(after[n], original[n])]
+            if broken:
+                await self.runner.restore_all(original, self.order)
+                notes.append(f"Secondary failure: {', '.join(broken)} failed after the fault was removed and stayed down "
+                             f"until Chaos Sentinel restarted it.")
+
             result = self._result(run_id, exp, label, probe, started_wall, restored_at)
+            result["notes"] = notes
             self.results.append(result)
             self.phase = "done"
             return result

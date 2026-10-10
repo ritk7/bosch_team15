@@ -10,7 +10,9 @@ Behaviour comes from the app's source code (github.com/dockersamples/example-vot
   Redis keeps the queue in memory only.
 Measured on Docker (selftest, 2026-10-10), and the simulation follows the measurement where it differs from the source:
 - crash redis: vote requests hang (no fast 500; the name "redis" stops resolving), so p95 trips the guard after ~4 s;
-  the worker did not exit, it reconnected once Redis was back. Other behaviour above is still unverified.
+  the worker did not exit, it reconnected once Redis was back.
+- pause worker, then crash redis: acknowledged votes queued in Redis are lost (24 of 224), and the worker exits when it
+  is unfrozen and finds its Redis connection broken; with no restart policy it stays down. Other behaviour is unverified.
 """
 from __future__ import annotations
 
@@ -76,6 +78,7 @@ class SimVoting:
         self._worker_inflight: tuple[str, str] | None = None
         self._redis_hang: float | None = None
         self._db_hang: float | None = None
+        self._worker_doomed = False
 
     # ---- state helpers -------------------------------------------------------------------------------------
     def reach(self, name: str, t: float) -> str:
@@ -95,6 +98,7 @@ class SimVoting:
         s = self.svcs[name]
         s.state, s.started_at, s.restart_at = "running", t, None
         if name == "worker":
+            self._worker_doomed = False
             self._worker_ready, self._worker_next = False, t + WARMUP_S["worker"]
             self._redis_hang = self._db_hang = None
 
@@ -106,6 +110,8 @@ class SimVoting:
         s.state = "stopped"
         if name == "redis":
             self.queue.clear()  # the queue lives in memory only
+            if self.svcs["worker"].state == "paused":
+                self._worker_doomed = True  # measured: a worker frozen while Redis died exits on reconnect
         if name == "worker":
             self._worker_inflight = None  # popped but never written: lost
         if s.restart_policy in SELF_HEAL:
@@ -130,6 +136,9 @@ class SimVoting:
         self._t = t
 
     def _worker_tick(self, t: float) -> None:
+        if self._worker_doomed and self._worker_ready and self.reach("redis", t) == "up":
+            self._worker_doomed = False
+            return self._exit("worker", t)
         # a throttled worker loops slower; a throttled (overloaded) database makes each INSERT slower
         db_slow = self._slow("db")
         nxt = t + WORKER_TICK_S * self._slow("worker") + WORKER_WORK_S * (1 if db_slow == 1 else 20 * db_slow)

@@ -59,7 +59,7 @@ def build_graph(compose: Path, *, roles: dict[str, str] | None = None, extra_edg
             n_notes.append("No restart policy: if the process exits, the container stays down.")
         if replicas == 1 and callers:
             n_notes.append(f"Single replica used by {', '.join(sorted(callers))}.")
-        if role in STATEFUL_ROLES and not named_volume:
+        if role in ("cache", "queue") and not named_volume and any(k in str(image) for k in ("redis", "memcached")):
             n_notes.append("Keeps its data in memory only (no persistent volume).")
         nodes.append({
             "id": name, "role": role, "image": str(image),

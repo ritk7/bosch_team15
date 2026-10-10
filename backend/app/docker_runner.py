@@ -15,6 +15,7 @@ import httpx
 
 from .sim import Clock
 
+HELPER_IMAGE = "alpine:3.20"  # only used to deliver SIGKILL to one process of the target project
 COMPOSE_STATE = {"running": "running", "exited": "stopped", "dead": "stopped", "created": "stopped",
                  "paused": "paused", "restarting": "restarting", "removing": "stopped"}
 
@@ -180,23 +181,20 @@ class DockerRunner:
                     "connected": self.connected[s], "cpus": self.cpus[s]} for s in self.allowed}
 
     async def crash(self, svc: str) -> None:
-        """Make the main process exit, as a real crash would. `docker kill` marks the container as manually stopped, so a
-        restart policy would never fire (measured); a signal from inside the container does not. Processes that ignore
-        the signal as PID 1 (e.g. vote's Flask dev server) fall back to `docker compose kill`."""
+        """SIGKILL the container's main process, as an OOM kill or segfault would (exit 137).
+        `docker kill` marks a container as manually stopped, so a restart policy would never fire, and SIGTERM lets
+        Redis save its data first (both measured). So a short-lived helper in the host PID namespace sends SIGKILL to
+        exactly this container's process id (read from docker inspect). Falls back to `docker compose kill`."""
         self._check(svc)
         container = await self._container(svc)
-        before = await self._started(container)
-        await self.exe(self.compose_args("exec", "-T", svc, "sh", "-c", "kill -TERM 1"), 10.0)
-        for _ in range(8):
-            await asyncio.sleep(0.5)
-            now = await self._started(container)
-            if now != before:  # exited, or exited and already restarted by its policy
+        code, out, _ = await self.exe([self.docker, "inspect", "-f", "{{.State.Pid}}", container], 10.0)
+        pid = out.strip()
+        if code == 0 and pid.isdigit() and int(pid) > 1:
+            code, _, _ = await self.exe([self.docker, "run", "--rm", "--privileged", "--pid=host", HELPER_IMAGE,
+                                         "kill", "-9", pid], 30.0)
+            if code == 0:
                 return
         await self._compose("kill", "-s", "SIGKILL", svc)
-
-    async def _started(self, container: str) -> str:
-        code, out, _ = await self.exe([self.docker, "inspect", "-f", "{{.State.Status}} {{.State.StartedAt}}", container], 10.0)
-        return out.strip() if code == 0 else ""
 
     async def start(self, svc: str) -> None:
         self._check(svc)
