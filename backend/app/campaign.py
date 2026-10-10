@@ -6,8 +6,11 @@ persisted first, so even a crash of this process is undone on the next start.
 from __future__ import annotations
 
 import asyncio
+import math
 import secrets
 import time
+from contextlib import asynccontextmanager
+import yaml
 
 from . import agents, analysis, config, fixes, injectors, ledger, mapper, planner, score, state
 from .guard import Guard, Thresholds
@@ -28,7 +31,9 @@ class Engine:
         self.persist = persist  # the twin engine never touches the safety files
         self.target, self.runner = target, runner
         self.clock = runner.clock
-        self.rate = rate or config.PROBE_RATE
+        self.rate = config.PROBE_RATE if rate is None else rate
+        if not math.isfinite(self.rate) or self.rate <= 0:
+            raise ValueError("Probe rate must be a finite positive number")
         self.guard = Guard()  # thresholds set in refresh_graph (blast radius depends on the app's size)
         self.phase = "idle"
         self.current: dict | None = None
@@ -37,6 +42,7 @@ class Engine:
         self.error: str | None = None
         self.predictions: dict[str, dict] = {}
         self.task: asyncio.Task | None = None
+        self._operation_task: asyncio.Task | None = None
         self._probe: Probe | None = None
         self._services: list[dict] = []
         self._cleanups: list = []
@@ -71,13 +77,34 @@ class Engine:
 
     @property
     def busy(self) -> bool:
-        return self.task is not None and not self.task.done()
+        return (self.task is not None and not self.task.done()) or self._operation_task is not None
+
+    @asynccontextmanager
+    async def operation(self):
+        """Reserve the engine across HTTP awaits, not just background experiments."""
+        if self.busy:
+            raise Busy("Another operation is already running")
+        self._operation_task = asyncio.current_task()
+        try:
+            yield
+        finally:
+            self._operation_task = None
+
+    def _check_fault_scope(self, fault: dict) -> None:
+        if (fault.get("target", self.target.name) != self.target.name
+                or fault.get("runner", self.runner.kind) != self.runner.kind
+                or fault.get("project", getattr(self.runner, "project", None)) != getattr(self.runner, "project", None)
+                or not set(fault.get("original", {})).issubset(self.order)):
+            raise RuntimeError("Saved fault belongs to another target/runner. Recovery record preserved; start that target to restore it.")
 
     # ---- startup safety ------------------------------------------------------------------------------------
     async def recover_on_startup(self) -> list[str]:
+        if not self.persist:
+            return []
         fault = state.load_active_fault()
         if not fault:
             return []
+        self._check_fault_scope(fault)
         restored = await self.runner.restore_all(fault["original"], self.order)
         state.clear_active_fault()
         self.error = f"Restored after an interrupted run ({fault.get('experiment_id')}): {', '.join(restored) or 'nothing to do'}"
@@ -90,20 +117,49 @@ class Engine:
         self.results = snap.get("results") or []
         self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
         self.applied_fixes = snap.get("applied_fixes") or []
+        if self.fixes:
+            # Public snapshots omit executor metadata. Rebuild legacy restart targets from validated rule snippets,
+            # preserving fix IDs so approval/applied status never shifts to a different recommendation.
+            found = (self.analysis or {}).get("findings", [])
+            refreshed = {x["title"]: x for x in analysis.rules_fixes(found, self.results, self.graph)}
+            restored_fixes = []
+            for saved in self.fixes.get("fixes", []):
+                fx = dict(saved)
+                if fx.get("auto_applicable"):
+                    try:
+                        services = (yaml.safe_load(fx["snippet"]) or {}).get("services", {})
+                        if (not isinstance(services, dict) or not services
+                                or any(s not in self.order or not isinstance(spec, dict)
+                                       or set(spec) != {"restart"} or spec["restart"] != "unless-stopped"
+                                       for s, spec in services.items())):
+                            raise ValueError("Invalid saved restart fix")
+                        fx["_services"] = sorted(services)
+                        fx["_findings"] = [f["id"] for f in found if f["service"] in services] or [fx["finding_id"]]
+                    except (ValueError, TypeError, KeyError, AttributeError, yaml.YAMLError):
+                        fx["auto_applicable"] = False
+                elif fx["title"] in refreshed:
+                    fresh = refreshed[fx["title"]]
+                    fx = {**fresh, "id": fx["id"], "finding_id": fx["finding_id"]}
+                restored_fixes.append(fx)
+            self.fixes = {"fixes": restored_fixes, "decided_by": "rules", "model": "rules engine (revalidated saved fixes)"}
         self.score_history = snap.get("score_history") or []
         self.compare, self.twin, self.plan = snap.get("compare"), snap.get("twin"), snap.get("plan")
         camp = snap.get("campaign") or {}
         if camp.get("status") == "running":
             camp["status"] = "stopped"
         self.campaign = camp or self.campaign
-        if snap.get("baseline"):
-            self.baseline = {**snap["baseline"], "votes_sent": 0, "votes_stored": 0}
+        # A saved baseline is historical evidence, not proof the app is healthy after a restart.
+        self.baseline = None
         if self.results:
             last = self.results[-1]
             self.current = {"run_id": last["run_id"], "experiment": last["experiment"], "prediction": last["prediction"],
                             "label": last["label"], "elapsed_s": last["timeline"][-1]["t"] if last["timeline"] else 0,
-                            "fault_duration_s": config.FAULT_S, "timeline": last["timeline"], "fleet": last["fleet"],
+                            "wall_s": last.get("wall_s"),
+                            "fault_duration_s": last.get("fault_duration_s", config.FAULT_S),
+                            "fault_ended_s": last.get("fault_ended_s"), "timeline": last["timeline"], "fleet": last["fleet"],
                             "counters": {k: last["outcome"][k] for k in ("sent", "acked", "stored", "lost", "errors")}}
+            self.guard.tripped = last["outcome"]["guard_tripped"]
+            self.guard.reason = last["outcome"]["guard_reason"]
             self.phase = "done"
         return True
 
@@ -117,6 +173,8 @@ class Engine:
 
     # ---- baseline ------------------------------------------------------------------------------------------
     async def measure_baseline(self, duration_s: float = 5.0) -> dict:
+        if not math.isfinite(duration_s) or not 1 <= duration_s <= 60:
+            raise ValueError("Baseline duration must be between 1 and 60 seconds")
         await self.target.prepare(self.runner)
         probe = Probe(self.runner.client(), self.clock, self.rate, f"b{secrets.token_hex(3)}")
         probe.start()
@@ -125,6 +183,7 @@ class Engine:
             await probe.stop_sending()
             await probe.drain(6.0)
             await self.clock.sleep(1.0)
+            probe.ensure_healthy()
             await probe.poll(final=True)
         finally:
             await probe.close()
@@ -152,6 +211,8 @@ class Engine:
     def start_run(self, exp_id: str, label: str = "before", fault_s: float | None = None) -> str:
         if self.busy:
             raise Busy("An experiment is already running")
+        if self.persist and state.load_active_fault():
+            raise Busy("A previous fault needs restoration; press the kill switch first")
         exp = self.experiment(exp_id)
         run_id = f"r{secrets.token_hex(3)}"
         self.error = None
@@ -162,28 +223,32 @@ class Engine:
         return run_id
 
     async def run(self, run_id: str, exp: dict, label: str, fault_s: float) -> dict | None:
+        self.guard = Guard(self.guard.thresholds)  # a previous run's trip must not leak into the next baseline
         self.current = {"run_id": run_id, "experiment": exp, "prediction": self.predictions.pop(exp["id"], None),
-                        "label": label, "elapsed_s": 0.0, "fault_duration_s": fault_s, "timeline": [], "fleet": [],
+                        "label": label, "elapsed_s": 0.0, "wall_s": 0.0, "fault_duration_s": fault_s, "fault_ended_s": None, "timeline": [], "fleet": [],
                         "counters": {"sent": 0, "acked": 0, "stored": 0, "lost": 0, "errors": 0}}
         started_wall = time.time()
         original: dict | None = None
         probe: Probe | None = None
         restored_at: float | None = None
         try:
+            self.phase = "baseline"
+            if self._expected is not None:
+                before = await self.runner.snapshot()
+                changed = [n for n in self.order if n in self._expected and differs(before[n], self._expected[n])]
+                if changed:
+                    await self.runner.restore_all(self._expected, self.order)
+                    self.baseline = None
+                    self.error = f"Pre-flight restored {', '.join(changed)}, which differed from the healthy app"
+            await self.runner.wait_ready(self.order)
             if self.baseline is None:
-                self.phase = "baseline"
                 await self.measure_baseline()
-            await self.runner.wait_ready(self.order)  # start every experiment from a healthy app
+            if (not self.baseline["votes_sent"] or self.baseline["error_pct"] > 0
+                    or self.baseline["votes_stored"] != self.baseline["votes_sent"]):
+                raise RuntimeError("Baseline is not healthy: all probe units must be acknowledged and stored before injecting a fault")
             original = await self.runner.snapshot()
             if self._expected is None:
                 self._expected = original
-            down = [n for n in self.order if self._expected.get(n, {}).get("state") == "running"
-                    and original.get(n, {}).get("state") != "running"]
-            if down:  # something stayed down after an earlier run: never start a new fault on a broken app
-                await self.runner.restore_all(self._expected, self.order)
-                await self.runner.wait_ready(self.order)
-                original = await self.runner.snapshot()
-                self.error = f"Pre-flight restarted {', '.join(down)}, which was down before this run"
             probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id)
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
@@ -204,7 +269,9 @@ class Engine:
 
             self.phase = "inject"
             if self.persist:
-                state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time()})
+                state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time(),
+                                         "target": self.target.name, "runner": self.runner.kind,
+                                         "project": getattr(self.runner, "project", None)})
             self.guard.arm(self.baseline["p95_ms"] if self.baseline else None)  # never a fault without the guard
             self._targets = injectors.targets_of(exp)
             self._cleanups = await injectors.apply(self.runner, exp, probe)
@@ -217,10 +284,13 @@ class Engine:
             if self.persist:
                 state.clear_active_fault()
             restored_at = self.clock.now()
+            self.current["fault_ended_s"] = round(restored_at - self.t0, 2)
             self.guard.disarm()
 
             self.phase = "recover"
-            while self.clock.now() - restored_at < RECOVER_MAX_S and self.clock.now() - t_begin < self.guard.thresholds.max_wall_s:
+            # The guard's wall limit bounds an armed fault, not observation after verified restoration. Slow
+            # health checks must not consume the separate, bounded recovery window and hide actual recovery.
+            while self.clock.now() - restored_at < RECOVER_MAX_S:
                 if probe.recovered_since(restored_at, self.clock.now()):
                     break
                 await self._tick(probe, t_begin, fault_s)
@@ -275,7 +345,12 @@ class Engine:
             if probe:
                 await probe.close()
             if original is not None and restored_at is None:
-                await asyncio.shield(self._restore(original))
+                try:
+                    await asyncio.shield(self._restore(original))
+                    if probe:
+                        self.current["fault_ended_s"] = round(self.clock.now() - self.t0, 2)
+                except Exception as err:
+                    self.error = f"{self.error or 'Run failed'}; restoration failed: {err}. Recovery record retained."
             self.guard.disarm()
             self._probe = None
             if self.persist:
@@ -291,7 +366,8 @@ class Engine:
 
     async def _restore(self, original: dict) -> list[str]:
         restored = await self.runner.restore_all(original, self.order)
-        state.clear_active_fault()
+        if self.persist:
+            state.clear_active_fault()
         return restored
 
     async def _watch(self, probe: Probe, *, until: float, t_begin: float, fault_s: float, guarded: bool = False) -> None:
@@ -302,8 +378,9 @@ class Engine:
                 return
 
     async def _tick(self, probe: Probe, t_begin: float, fault_s: float) -> None:
-        now = self.clock.now()
+        probe.ensure_healthy()
         self._services = await self.runner.services()
+        now = self.clock.now()  # Docker inspection itself can take time; never judge a stale wall clock
         # blast radius = services down or unhealthy that were not faulted on purpose
         on_purpose = self._targets if self.guard.armed else set()
         unhealthy = sum((s["state"] != "running" or s["health"] == "unhealthy") and s["id"] not in on_purpose
@@ -318,6 +395,7 @@ class Engine:
                                 "err": sum(not u.acked for u in last), "p95_ms": round(w["p95_ms"], 1),
                                 "error_rate": round(w["error_rate"], 3), "unhealthy": unhealthy})
         cur["elapsed_s"] = round(now - self.t0, 1)
+        cur["wall_s"] = round(now - t_begin, 1)
         cur["fleet"] = probe.fleet()
         cur["counters"] = probe.counters()
 
@@ -331,7 +409,7 @@ class Engine:
         first_bad = next((i for i, u in enumerate(after) if not u.good()), None)
         recovery: float | None
         if first_bad is None:
-            recovery = 0.0
+            recovery = 0.0 if len(after) >= 5 else None
         else:
             streak_start = len(after)
             while streak_start > 0 and after[streak_start - 1].good():
@@ -348,10 +426,13 @@ class Engine:
         if pred:
             perr = {"errors_pct_points": round(outcome["error_pct"] - pred["expected_error_pct"], 1),
                     "votes_lost": outcome["lost"] - pred["expected_votes_lost"],
-                    "recovery_s": round((recovery if recovery is not None else RECOVER_MAX_S) - pred["expected_recovery_s"], 1)}
+                    "recovery_s": round(recovery - pred["expected_recovery_s"], 1) if recovery is not None else None}
         return {"run_id": run_id, "experiment": exp, "prediction": pred, "outcome": outcome, "timeline": timeline,
                 "fleet": probe.fleet(), "started_at": started_wall, "duration_s": round(time.time() - started_wall, 1),
-                "label": label, "prediction_error": perr}
+                "label": label, "prediction_error": perr,
+                "configuration_signature": agents.configuration_signature(self.graph, self.rate, self.current["fault_duration_s"]),
+                "wall_s": self.current["wall_s"],
+                "fault_duration_s": self.current["fault_duration_s"], "fault_ended_s": self.current["fault_ended_s"]}
 
     # ---- analysis, fixes, re-run ---------------------------------------------------------------------------
     async def analyze(self) -> dict:
@@ -377,7 +458,7 @@ class Engine:
 
     async def apply_fixes(self, fix_ids: list[str]) -> dict:
         """Engineer-approved: write the override and recreate only the services it changes."""
-        if self.busy:
+        if self.busy and self._operation_task is not asyncio.current_task():
             raise Busy("An experiment is running")
         chosen = [x for x in (self.fixes or {}).get("fixes", []) if x["id"] in fix_ids]
         if not chosen:
@@ -386,9 +467,12 @@ class Engine:
         if advice:
             raise ValueError(f"{', '.join(advice)} are advice only and cannot be applied automatically")
         restart = {svc: "unless-stopped" for x in chosen for svc in x.get("_services", [])}
+        if not restart or any(not x.get("_services") for x in chosen):
+            raise ValueError("Saved fixes have no executable service targets. Regenerate recommendations before applying.")
         overlay = fixes.write_overlay(self.target.overlay_file(), restart, {n["id"] for n in self.graph["nodes"]})
         self.refresh_graph()
         await self.runner.apply_overlay(sorted(restart))
+        self.baseline = None
         self.applied_fixes = sorted(set(self.applied_fixes) | {x["id"] for x in chosen})
         self.save()
         return {"ok": True, "overlay": overlay,
@@ -407,7 +491,8 @@ class Engine:
         async def sequence() -> None:
             for exp in exps:
                 await self.predict(exp["id"])
-                await self.run(f"r{secrets.token_hex(3)}", exp, "after fix", config.FAULT_S)
+                if await self.run(f"r{secrets.token_hex(3)}", exp, "after fix", config.FAULT_S) is None:
+                    return
             await self.analyze()
 
         self.task = asyncio.create_task(sequence())
@@ -441,6 +526,9 @@ class Engine:
                     r = await self.run(f"r{secrets.token_hex(3)}", exp, f"campaign {strategy}", config.FAULT_S)
                     if r:
                         done.append(r)
+                    else:
+                        self.campaign["status"] = "stopped"
+                        return  # do not inject another fault after a failed or unrestored run
                 self.campaign["status"] = "done"
                 await self.analyze()
                 await self.recommend()
@@ -448,6 +536,12 @@ class Engine:
             except asyncio.CancelledError:
                 self.campaign["status"] = "stopped"
                 raise
+            except Exception as err:
+                self.campaign["status"] = "stopped"
+                self.error = f"Campaign failed: {type(err).__name__}: {err}"
+            finally:
+                if self.persist:
+                    state.save_snapshot(await self.state_json())
 
         self.task = asyncio.create_task(loop())
 
@@ -498,7 +592,7 @@ class Engine:
 
     async def reset_demo(self) -> str:
         """Undo applied fixes and clear runs, so the next judge sees the original app."""
-        if self.busy:
+        if self.busy and self._operation_task is not asyncio.current_task():
             raise Busy("An experiment is running")
         fixes.clear_overlay(self.target.overlay_file())
         self.refresh_graph()
@@ -507,19 +601,27 @@ class Engine:
         self.score_history, self.current, self.phase, self.error = [], None, "idle", None
         self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
         self.compare, self.twin, self.plan = None, None, None
+        self.baseline, self._expected = None, None
+        self.guard = Guard(self.guard.base)
         self.save()
         return "Fixes removed and runs cleared"
 
     # ---- kill switch ---------------------------------------------------------------------------------------
     async def killswitch(self) -> list[str]:
         """Stop whatever is running and put every service back the way it was before the fault."""
-        fault = state.load_active_fault()
+        fault = state.load_active_fault() if self.persist else None
+        if fault:
+            self._check_fault_scope(fault)
         want = fault["original"] if fault else \
             {s: {"state": "running", "connected": True, "cpus": None} for s in self.order}
         before = await self.runner.snapshot()
         if self.busy and self.task:
             self.task.cancel()  # the run restores in its finally block
             await asyncio.gather(self.task, return_exceptions=True)
+        if self._operation_task and self._operation_task is not asyncio.current_task():
+            operation = self._operation_task
+            operation.cancel()
+            await asyncio.gather(operation, return_exceptions=True)
         await self._restore(want)
         return [n for n in self.order if n in before and n in want and differs(before[n], want[n])]
 

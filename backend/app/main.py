@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import math
 
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,8 @@ engine: Engine | None = None
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global engine
-    target = targets.load()
+    fault = state.load_active_fault()
+    target = targets.load(fault["target"] if fault and fault.get("target") else None)
     engine = Engine(target, make_runner(target))
     await engine.recover_on_startup()  # undo a fault left behind by a crash of this process
     engine.load_snapshot(state.load_snapshot(target.name))  # keep the demo's runs and findings across a restart
@@ -47,7 +49,30 @@ def idle() -> Engine:
     e = eng()
     if e.busy:
         raise HTTPException(409, "An experiment is running. Wait for it or press the kill switch.")
+    if e.persist and state.load_active_fault():
+        raise HTTPException(409, "A previous fault still needs restoration. Press the kill switch before another operation.")
     return e
+
+
+def number(body: dict, key: str, default: float, low: float, high: float, *, integer: bool = False):
+    value = body.get(key, default)
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        value = float(value)
+        if not math.isfinite(value) or not low <= value <= high or (integer and not value.is_integer()):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(422, f"{key} must be {'an integer' if integer else 'a number'} between {low:g} and {high:g}") from None
+    return int(value) if integer else value
+
+
+async def exclusive(e: Engine, action):
+    try:
+        async with e.operation():
+            return await action()
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
 
 
 @app.get("/api/health")
@@ -91,12 +116,15 @@ async def select_target(body: dict = Body(...)) -> dict:
 
 @app.post("/api/target/start")
 async def target_start() -> dict:
-    return {"ok": True, "detail": await idle().runner.up()}
+    e = idle()
+    return {"ok": True, "detail": await exclusive(e, e.runner.up)}
 
 
 @app.post("/api/target/stop")
 async def target_stop() -> dict:
-    return {"ok": True, "detail": await idle().runner.down()}
+    e = idle()
+    e.baseline = None
+    return {"ok": True, "detail": await exclusive(e, e.runner.down)}
 
 
 @app.get("/api/catalog")
@@ -106,17 +134,16 @@ def catalog() -> dict:
 
 @app.post("/api/baseline")
 async def baseline(body: dict = Body(default={})) -> dict:
-    duration = float(body.get("duration_s") or 5)
-    if not 1 <= duration <= 60:
-        raise HTTPException(422, "duration_s must be between 1 and 60")
-    return await idle().measure_baseline(duration)
+    duration = number(body, "duration_s", 5, 1, 60)
+    e = idle()
+    return await exclusive(e, lambda: e.measure_baseline(duration))
 
 
 @app.post("/api/predict")
 async def predict(body: dict = Body(...)) -> dict:
-    e = eng()
+    e = idle()
     try:
-        return await e.predict(str(body.get("experiment_id")))
+        return await exclusive(e, lambda: e.predict(str(body.get("experiment_id"))))
     except KeyError:
         raise HTTPException(404, f"Unknown experiment '{body.get('experiment_id')}'") from None
 
@@ -125,11 +152,11 @@ async def predict(body: dict = Body(...)) -> dict:
 async def run(body: dict = Body(...)) -> dict:
     e = eng()
     fault_s = body.get("fault_duration_s")
-    if fault_s is not None and not 1 <= float(fault_s) <= 30:
-        raise HTTPException(422, "fault_duration_s must be between 1 and 30")
+    if fault_s is not None:
+        fault_s = number(body, "fault_duration_s", 10, 1, 30)
     try:
         return {"run_id": e.start_run(str(body.get("experiment_id")), str(body.get("label") or "before"),
-                                      float(fault_s) if fault_s is not None else None)}
+                                      fault_s)}
     except KeyError:
         raise HTTPException(404, f"Unknown experiment '{body.get('experiment_id')}'") from None
     except Busy as err:
@@ -147,7 +174,9 @@ async def campaign_start(body: dict = Body(...)) -> dict:
     if strategy not in ("ai", "random"):
         raise HTTPException(422, "strategy must be ai or random")
     try:
-        idle().start_campaign(int(body.get("budget") or 5), strategy, int(body.get("seed") or 7))
+        e = idle()
+        e.start_campaign(number(body, "budget", 5, 1, max(5, len(e.catalog)), integer=True), strategy,
+                         number(body, "seed", 7, 0, 2**32 - 1, integer=True))
     except Busy as err:
         raise HTTPException(409, str(err)) from None
     return {"ok": True}
@@ -203,7 +232,7 @@ async def analyze() -> dict:
     e = idle()
     if not e.results:
         raise HTTPException(409, "Run at least one experiment first")
-    return await e.analyze()
+    return await exclusive(e, e.analyze)
 
 
 @app.post("/api/fixes")
@@ -211,29 +240,37 @@ async def get_fixes() -> dict:
     e = idle()
     if not e.results:
         raise HTTPException(409, "Run at least one experiment first")
-    fx = await e.recommend()
+    fx = await exclusive(e, e.recommend)
     return {**fx, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")} for x in fx["fixes"]]}
 
 
 @app.post("/api/apply-fixes")
 async def apply_fixes(body: dict = Body(...)) -> dict:
     try:
-        return await idle().apply_fixes([str(i) for i in body.get("fix_ids") or []])
+        ids = body.get("fix_ids", [])
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise ValueError("fix_ids must be a list of strings")
+        e = idle()
+        return await exclusive(e, lambda: e.apply_fixes(ids))
     except ValueError as err:
         raise HTTPException(422, str(err)) from None
 
 
 @app.post("/api/rerun")
 async def rerun(body: dict = Body(default={})) -> dict:
+    ids = body.get("experiment_ids")
+    if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+        raise HTTPException(422, "experiment_ids must be a list of strings")
     try:
-        return {"ok": True, "experiments": idle().start_rerun(body.get("experiment_ids"))}
+        return {"ok": True, "experiments": idle().start_rerun(ids)}
     except KeyError as err:
         raise HTTPException(404, f"Unknown experiment {err}") from None
 
 
 @app.post("/api/reset")
 async def reset_demo() -> dict:
-    return {"ok": True, "detail": await idle().reset_demo()}
+    e = idle()
+    return {"ok": True, "detail": await exclusive(e, e.reset_demo)}
 
 
 @app.get("/api/state")

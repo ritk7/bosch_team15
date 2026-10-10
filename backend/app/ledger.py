@@ -8,6 +8,8 @@ The gap between the two is the cost story for the pitch, so log rule and ML deci
 from __future__ import annotations
 
 import statistics
+import json
+import logging
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -33,7 +35,23 @@ class Entry:
     accepted: bool
 
 
-_entries: list[Entry] = []
+LEDGER_FILE = config.CACHE_DIR / "cost_ledger.json"
+
+
+def load_entries() -> list[Entry]:
+    try:
+        data = json.loads(LEDGER_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            raise ValueError("Expected a list of ledger entries")
+        return [Entry(**entry) for entry in data]
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError, TypeError):
+        logging.getLogger(__name__).warning("Could not restore cost ledger from %s", LEDGER_FILE)
+        return []
+
+
+_entries: list[Entry] = load_entries()
 _lock = threading.Lock()
 LEDGER_FILE = config.CACHE_DIR / "ledger.json"  # so the Cost view survives a restart of the tool
 
@@ -58,6 +76,12 @@ def _save() -> None:
 
 
 _load()
+
+
+def _save() -> None:
+    tmp = LEDGER_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps([asdict(e) for e in _entries]), encoding="utf-8")
+    tmp.replace(LEDGER_FILE)
 
 
 def estimate_tokens(text: str) -> int:

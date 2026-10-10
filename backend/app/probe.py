@@ -28,7 +28,7 @@ class Unit:
 
     @property
     def acked(self) -> bool:
-        return self.code == 200
+        return self.code is not None and 200 <= self.code < 300
 
     def state(self) -> str:
         if self.done is None:
@@ -56,13 +56,25 @@ def p95(values: list[float]) -> float:
 
 class Probe:
     def __init__(self, client, clock, rate: float, run_id: str):
+        if not math.isfinite(rate) or rate <= 0:
+            raise ValueError("Probe rate must be a finite positive number")
         self.client, self.clock, self.rate = client, clock, rate
         self.prefix = f"cs-{run_id}-"
         self.units: list[Unit] = []
         self.sending = False
         self._tasks: set[asyncio.Task] = set()
         self._loops: list[asyncio.Task] = []
+        self._monitored_tasks: list[asyncio.Task] = []
         self.db_visible = True
+
+    def monitor(self, task: asyncio.Task) -> None:
+        self._monitored_tasks.append(task)
+
+    def ensure_healthy(self) -> None:
+        """Never publish measurements as complete when polling or a scheduled fault silently died."""
+        for task in [*self._loops, *self._monitored_tasks]:
+            if task.done() and not task.cancelled() and task.exception() is not None:
+                raise RuntimeError(f"Probe or scheduled fault failed: {task.exception()}") from task.exception()
 
     def start(self) -> None:
         self.sending = True
@@ -94,10 +106,15 @@ class Probe:
 
     async def poll(self, final: bool = False) -> None:
         """Business check: which acknowledged units reached the database, which still sit in the queue."""
-        queued = await self.client.queued_ids(self.prefix)
-        stored = await self.client.stored_ids(self.prefix)
+        if hasattr(self.client, "observed_ids"):
+            queued, stored = await self.client.observed_ids(self.prefix)
+        else:
+            queued = await self.client.queued_ids(self.prefix)
+            stored = await self.client.stored_ids(self.prefix)
         self.db_visible = stored is not None
         if stored is None:
+            for u in self.units:
+                u.missing = 0  # unavailable observations cannot establish consecutive absence
             return
         now = self.clock.now()
         for u in self.units:
@@ -105,11 +122,13 @@ class Probe:
                 continue
             if u.id in stored:
                 u.stored_at, u.lost, u.missing = now, False, 0
-            elif queued is not None and u.id not in queued and now - u.done > 1.0:
+            elif queued is not None and u.id not in queued and u.done is not None and now - u.done > 1.0:
                 u.missing += 1  # two polls in a row rule out a unit caught between LPOP and INSERT
-                u.lost = final or u.missing >= 2
+                u.lost = u.missing >= 2  # final polling must not weaken the evidence requirement
             else:
                 u.missing = 0
+                if queued is not None and u.id in queued:
+                    u.lost = False
 
     async def stop_sending(self) -> None:
         self.sending = False
@@ -129,6 +148,7 @@ class Probe:
         for u in self.units:  # anything still unanswered when the probe closes counts as a timeout
             if u.done is None:
                 u.done, u.code = self.clock.now(), None
+                u.latency_ms = max(0.0, u.done - u.sent) * 1000
 
     # ---- views -----------------------------------------------------------------------------------------------
     def fleet(self, size: int = 100) -> list[str]:

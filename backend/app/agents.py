@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import hashlib
 
 from . import ledger, llm
 from .guard import Thresholds
@@ -24,12 +26,17 @@ def _compact(graph: dict) -> dict:
             "edges": [f"{e['from']}->{e['to']} ({e['label']})" for e in graph["edges"] if e["kind"] == "dataflow"]}
 
 
+def configuration_signature(graph: dict, rate: float, fault_s: float) -> str:
+    return hashlib.sha256(json.dumps({"graph": graph, "rate": rate, "fault_s": fault_s}, sort_keys=True).encode()).hexdigest()
+
+
 def rules_prediction(exp: dict, graph: dict, *, entry: str, sync: set[str], rate: float, fault_s: float,
                      history: list[dict], unit_plural: str) -> dict:
     """Deterministic hypothesis from the graph. Formulas are rough on purpose; the reveal shows how far off they were."""
     target = exp["target"]
     node = next(n for n in graph["nodes"] if n["id"] == target)
-    prev = [r for r in history if r["experiment"]["id"] == exp["id"]]
+    signature = configuration_signature(graph, rate, fault_s)
+    prev = [r for r in history if r["experiment"]["id"] == exp["id"] and r.get("configuration_signature") == signature]
     if prev:  # we measured this one before: predict what we saw
         o = prev[-1]["outcome"]
         rec = o["recovery_s"] if o["recovery_s"] is not None else 30.0
@@ -38,7 +45,8 @@ def rules_prediction(exp: dict, graph: dict, *, entry: str, sync: set[str], rate
                 "reason": f"the last run of {exp['id']} measured these numbers and nothing in the graph changed since",
                 "hypothesis": f"{target} behaves as it did in run {prev[-1]['run_id']}"}
 
-    self_heal = node["restart"] in ("always", "unless-stopped", "on-failure")
+    # Restart policies restart exited processes, not paused containers or disconnected networks.
+    self_heal = exp["type"] == "crash" and node["restart"] in ("always", "unless-stopped", "on-failure")
     consumers = {e["from"] for e in graph["edges"] if e["kind"] == "dataflow" and e["to"] in sync and e["from"] not in sync}
     downstream = {e["to"] for e in graph["edges"] if e["kind"] == "dataflow" and e["from"] in consumers} - sync
     th = Thresholds()
@@ -71,10 +79,13 @@ def rules_prediction(exp: dict, graph: dict, *, entry: str, sync: set[str], rate
 def _accept(text: str) -> bool:
     d = llm.extract_json(text)
     try:
-        return (d is not None and 0 <= float(d["expected_error_pct"]) <= 100 and int(d["expected_votes_lost"]) >= 0
+        lost = float(d["expected_votes_lost"]) if d is not None else -1
+        return (d is not None and math.isfinite(lost) and lost.is_integer() and lost >= 0
+                and not isinstance(d["expected_votes_lost"], bool) and 0 <= float(d["expected_error_pct"]) <= 100
                 and 0 <= float(d["expected_recovery_s"]) <= 300 and d["confidence"] in CONFIDENCE
-                and bool(str(d["reason"]).strip()) and bool(str(d["hypothesis"]).strip()))
-    except (KeyError, TypeError, ValueError):
+                and isinstance(d["reason"], str) and bool(d["reason"].strip())
+                and isinstance(d["hypothesis"], str) and bool(d["hypothesis"].strip()))
+    except (KeyError, TypeError, ValueError, OverflowError):
         return False
 
 
@@ -89,7 +100,8 @@ async def predict(exp: dict, graph: dict, *, entry: str, sync: set[str], rate: f
     rules = rules_prediction(exp, graph, entry=entry, sync=sync, rate=rate, fault_s=fault_s, history=history,
                              unit_plural=unit_plural)
     past = [{"id": r["experiment"]["id"], "error_pct": r["outcome"]["error_pct"], "lost": r["outcome"]["lost"],
-             "recovery_s": r["outcome"]["recovery_s"]} for r in history[-4:]]
+             "recovery_s": r["outcome"]["recovery_s"],
+             "same_configuration": r.get("configuration_signature") == configuration_signature(graph, rate, fault_s)} for r in history[-4:]]
     prompt = json.dumps({"experiment": {k: exp[k] for k in ("id", "type", "target", "description")},
                          "graph": _compact(graph), "entry": entry, "probe_rate_per_s": rate, "fault_s": fault_s,
                          "guard": "stops the fault when error rate over 3 s >= 60% or p95 >= 3 s",

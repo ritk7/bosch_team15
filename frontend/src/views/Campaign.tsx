@@ -169,7 +169,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
                 {r && (
                   <p className="mt-1 text-sm tabular-nums text-graphite">
                     Measured: {r.outcome.error_pct}% errors, <span className={r.outcome.lost ? "font-semibold text-crit" : ""}>{r.outcome.lost} {target.unit.plural} {target.unit.lost}</span>,
-                    recovery {r.outcome.recovery_s == null ? "never" : `${r.outcome.recovery_s} s`}{r.outcome.guard_tripped ? ", guard tripped" : ""}.
+                    recovery {r.outcome.recovery_s == null ? "not observed" : `${r.outcome.recovery_s} s`}{r.outcome.guard_tripped ? ", guard tripped" : ""}.
                   </p>
                 )}
               </li>

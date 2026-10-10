@@ -13,7 +13,7 @@ const CELL: Record<VoteState | "empty", string> = {
 export function FleetGrid({ fleet, unit }: { fleet: VoteState[]; unit: Unit }) {
   const cells: (VoteState | "empty")[] = [...fleet.slice(-100)];
   while (cells.length < 100) cells.push("empty");
-  const count = (s: VoteState) => fleet.filter((f) => f === s).length;
+  const count = (s: VoteState) => cells.filter((f) => f === s).length;
   const legend: { s: VoteState; label: string }[] = [
     { s: "ok", label: unit.stored },
     { s: "queued", label: "acknowledged, waiting" },
@@ -22,17 +22,17 @@ export function FleetGrid({ fleet, unit }: { fleet: VoteState[]; unit: Unit }) {
     { s: "pending", label: "no answer yet" },
   ];
   return (
-    <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start">
+    <div className="flex flex-col gap-4">
       <div
-        className="grid w-full max-w-[320px] shrink-0 grid-cols-10 gap-[3px]"
+        className="fleet-cells"
         role="img"
-        aria-label={`Last ${fleet.length} ${unit.plural}: ${legend.map((l) => `${count(l.s)} ${l.label}`).join(", ")}`}
+        aria-label={`Last ${Math.min(100, fleet.length)} ${unit.plural}: ${legend.map((l) => `${count(l.s)} ${l.label}`).join(", ")}`}
       >
         {cells.map((c, i) => (
-          <div key={i} className={`aspect-square rounded-[2px] ${CELL[c]} transition-colors duration-300`} />
+          <div key={i} title={`${unit.singular} ${i + 1}: ${c}`} aria-hidden="true" className={`aspect-square rounded-[3px] ${CELL[c]} transition-colors duration-300`} />
         ))}
       </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[0.8rem] text-graphite sm:grid-cols-3 2xl:grid-cols-1">
+      <ul className="fleet-legend text-graphite">
         {legend.map((l) => (
           <li key={l.s} className="flex items-center gap-2">
             <span aria-hidden="true" className={`inline-block h-3 w-3 shrink-0 rounded-[2px] ${CELL[l.s]}`} />

@@ -4,7 +4,7 @@
     python dev.py          backend on :8000 and the UI on :5173, both reloading on save
     python dev.py serve    build the UI and serve everything on :8000 (use this for the demo)
     python dev.py test     backend tests
-    python dev.py check    backend tests, then UI type check and build
+    python dev.py check    backend tests, frontend regression tests, UI type check and build
     python dev.py selftest [--target hawkbit]  real Docker: start the target, crash once, PASS/FAIL per step
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ def need_backend_deps() -> None:
 
 def need_npm() -> None:
     if not NPM:
-        sys.exit("npm wasn't found. Install Node.js 20 or newer from nodejs.org, then run this again.")
+        sys.exit("npm wasn't found. Install Node.js 22.18 or newer, then run this again.")
     if not (FRONTEND / "node_modules").exists():
         subprocess.check_call([NPM, "install"], cwd=FRONTEND)
 
@@ -50,6 +50,7 @@ def main() -> None:
     if cmd == "check":
         need_npm()
         sys.exit(subprocess.call([sys.executable, "-m", "pytest", "-q"], cwd=BACKEND)
+                 or subprocess.call([NPM, "test"], cwd=FRONTEND)
                  or subprocess.call([NPM, "run", "build"], cwd=FRONTEND))
     if cmd == "serve":
         need_npm()

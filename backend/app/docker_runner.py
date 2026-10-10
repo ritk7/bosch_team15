@@ -37,9 +37,15 @@ async def run_cmd(args: list[str], timeout: float = 60.0) -> tuple[int, str, str
     proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+    except (asyncio.TimeoutError, asyncio.CancelledError) as err:
+        if proc.returncode is None:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        await proc.communicate()  # drain pipes; canceled CLI children must not outlive the kill switch
+        if isinstance(err, asyncio.CancelledError):
+            raise
         return 124, "", f"timed out after {timeout:.0f} s"
     return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
@@ -111,6 +117,7 @@ class DockerRunner:
         self.healthchecked = {n["id"] for n in graph["nodes"] if n["healthcheck"]}
         self.depended_on = {n["id"] for n in graph["nodes"] if n["fan_in"] > 0}
         self.connected: dict[str, bool] = {s: True for s in self.allowed}
+        self._disconnected_networks: dict[str, set[str]] = {s: set() for s in self.allowed}
         self.cpus: dict[str, float | None] = {s: None for s in self.allowed}
         self.net: dict[str, str | None] = {s: None for s in self.allowed}
         self._client: DockerClient | None = None
@@ -142,7 +149,9 @@ class DockerRunner:
 
     async def _ps(self) -> list[dict]:
         code, out, _ = await self.exe(self.compose_args("ps", "-a", "--format", "json"), 20.0)
-        return parse_ps(out) if code == 0 else []
+        if code != 0:
+            raise RuntimeError("Cannot inspect Docker project state; readiness/restoration cannot be verified")
+        return parse_ps(out)
 
     async def _container(self, svc: str) -> str:
         for row in await self._ps():
@@ -156,8 +165,9 @@ class DockerRunner:
         if code != 0:
             return False, f"Docker daemon not answering: {err.strip()[:120]}"
         rows = await self._ps()
-        running = sum(r.get("State") == "running" for r in rows if r.get("Service") in self.allowed)
-        return running > 0, f"Docker project '{self.project}': {running}/{len(self.allowed)} services running"
+        running = {r.get("Service") for r in rows if r.get("Service") in self.allowed
+                   and r.get("State") == "running" and r.get("Health") not in ("unhealthy", "starting")}
+        return running == self.allowed, f"Docker project '{self.project}': {len(running)}/{len(self.allowed)} services ready"
 
     def _refresh_stats(self, names: list[str]) -> None:
         """docker stats takes ~3 s, so it runs in the background every few seconds and the UI reads the cache."""
@@ -241,23 +251,37 @@ class DockerRunner:
     async def _networks(self, container: str) -> list[str]:
         code, out, _ = await self.exe([self.docker, "inspect", "--format",
                                        "{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}", container], 10.0)
-        return out.split() if code == 0 else []
+        if code != 0:
+            raise RuntimeError(f"Cannot inspect networks for '{container}'")
+        return out.split()
 
     async def disconnect(self, svc: str) -> None:
         self._check(svc)
         container = await self._container(svc)
-        for net in await self._networks(container):
-            if net.startswith(f"{self.project}_"):  # only the project's own networks
-                await self.exe([self.docker, "network", "disconnect", net, container], 10.0)
-        self.connected[svc] = False
+        nets = [net for net in await self._networks(container) if net.startswith(f"{self.project}_")]
+        if not nets:
+            raise RuntimeError(f"No project-scoped network to disconnect for '{svc}'")
+        for net in nets:
+            code, _, err = await self.exe([self.docker, "network", "disconnect", net, container], 10.0)
+            if code != 0:
+                raise RuntimeError(f"Network disconnect failed for '{svc}': {err.strip()[:200]}")
+            self._disconnected_networks[svc].add(net)
+            self.connected[svc] = False  # partial failure must still be rolled back
 
     async def connect(self, svc: str) -> None:
         self._check(svc)
         container = await self._container(svc)
         spec = (self.target.graph_services().get(svc) or {})
         nets = spec.get("networks") or ["default"]
-        for net in (nets if isinstance(nets, list) else list(nets)):
-            await self.exe([self.docker, "network", "connect", "--alias", svc, f"{self.project}_{net}", container], 10.0)
+        names = self._disconnected_networks[svc] or {f"{self.project}_{net}" for net in nets}
+        attached = set(await self._networks(container))
+        for net in sorted(names):
+            if net in attached:
+                continue
+            code, _, err = await self.exe([self.docker, "network", "connect", "--alias", svc, net, container], 10.0)
+            if code != 0:
+                raise RuntimeError(f"Network reconnect failed for '{svc}': {err.strip()[:200]}")
+        self._disconnected_networks[svc].clear()
         self.connected[svc] = True
 
     async def set_cpus(self, svc: str, cpus: float | None) -> None:
@@ -290,45 +314,58 @@ class DockerRunner:
             raise RuntimeError(f"netem failed on {svc}: {err.strip()[:200]}")
         self.net[svc] = spec
 
-    async def _wait_up(self, svc: str, max_s: float = 25.0) -> None:
-        """Wait until the service runs, and until it is healthy when other services depend on it."""
-        waited, exited = 0.0, 0
-        while waited < max_s:
+    async def _wait_up(self, svc: str, max_s: float = 90.0) -> None:
+        """Wait for running/healthy, including health checks scheduled at Docker's default 30 s interval.
+
+        The old 25 s restore deadline expired before MySQL's first post-crash health check even when its process
+        was already answering. Keep verification bounded, but allow multiple checks before reporting failure.
+        """
+        deadline, exited = asyncio.get_running_loop().time() + max_s, 0
+        while asyncio.get_running_loop().time() < deadline:
             row = next((r for r in await self._ps() if r.get("Service") == svc), {})
             running = row.get("State") == "running"
             exited = exited + 1 if row.get("State") in ("exited", "dead") else 0
-            if exited >= 3:  # it died again on its own; the final safety check restarts and reports it
-                return
-            healthy = row.get("Health") in ("", None, "healthy") or svc not in self.depended_on
+            if exited >= 3:
+                raise RuntimeError(f"Service '{svc}' exited repeatedly while waiting for readiness")
+            healthy = row.get("Health") in ("", None, "healthy")
             if running and healthy:
                 return
             await asyncio.sleep(0.5)
-            waited += 0.5
+        raise RuntimeError(f"Service '{svc}' did not become ready within {max_s:g} s")
 
     async def restore_all(self, original: dict[str, dict], order: list[str]) -> list[str]:
         from .runner import differs
 
         restored: list[str] = []
+        failures: list[str] = []
         for name in order:
             want = original.get(name)
             if want is None or name not in self.allowed:
                 continue
-            now = (await self.snapshot())[name]
-            if not differs(now, want):
-                continue
-            if now["connected"] != want["connected"]:
-                await (self.connect(name) if want["connected"] else self.disconnect(name))
-            if now.get("cpus") != want.get("cpus"):
-                await self.set_cpus(name, want.get("cpus"))
-            if now.get("net") != want.get("net") and now["state"] == "running":
-                await self.set_net(name, want.get("net"))
-            if now["state"] == "paused" and want["state"] == "running":
-                await self.unpause(name)
-            elif now["state"] in ("stopped", "restarting") and want["state"] == "running":
-                await self.start(name)
-            restored.append(name)
-            if want["state"] == "running":
-                await self._wait_up(name)
+            try:
+                now = (await self.snapshot())[name]
+                if not differs(now, want):
+                    if want["state"] == "running":
+                        await self._wait_up(name)  # auto-restarted containers can still be unhealthy
+                    continue
+                if now["state"] == "paused" and want["state"] == "running":
+                    await self.unpause(name)
+                elif now["state"] in ("stopped", "restarting") and want["state"] == "running":
+                    await self.start(name)
+                if now["connected"] != want["connected"]:
+                    await (self.connect(name) if want["connected"] else self.disconnect(name))
+                if now.get("cpus") != want.get("cpus"):
+                    await self.set_cpus(name, want.get("cpus"))
+                if now.get("net") != want.get("net") and want["state"] == "running":
+                    await self.set_net(name, want.get("net"))
+                if want["state"] == "running":
+                    await self._wait_up(name)
+                restored.append(name)
+            except Exception as err:
+                failures.append(f"{name}: {err}")
+                # One failed dependency must not prevent recovery attempts on the remaining services.
+        if failures:
+            raise RuntimeError("Restoration incomplete: " + "; ".join(failures))
         return restored
 
     async def load(self, svc: str, workers: int):

@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { Activity, ArrowRight, Search, ShieldCheck, Square, Network, FlaskConical } from "lucide-react";
 import { FleetGrid } from "../components/FleetGrid";
 import { GuardCard } from "../components/GuardCard";
 import { LiveChart } from "../components/LiveChart";
 import { PredictionCard, Reveal } from "../components/PredictionCard";
 import { ServiceMap } from "../components/ServiceMap";
-import { api, type Experiment, type ExperimentResult, type Phase, type Prediction, type State, type Target, type TimelinePoint } from "../lib/api";
+import { api, type Experiment, type ExperimentResult, type Phase, type Prediction, type State, type Target } from "../lib/api";
 import { ms } from "../lib/format";
 
 const PHASES: { id: Phase; label: string }[] = [
@@ -19,15 +20,12 @@ const PHASES: { id: Phase; label: string }[] = [
 
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
-function firstBreach(timeline: TimelinePoint[], errLimit: number, p95Limit: number) {
-  return timeline.find((p) => p.t >= 0 && (p.error_rate >= errLimit || p.p95_ms >= p95Limit))?.t ?? null;
-}
-
 interface Props {
   state: State;
   target: Target;
   catalog: Experiment[];
   onChange: () => void;
+  connected: boolean;
   onTargetChange: () => void;
 }
 
@@ -63,8 +61,9 @@ function MapEditor({ target, disabled, onChange }: { target: Target; disabled: b
   );
 }
 
-export function Live({ state, target, catalog, onChange, onTargetChange }: Props) {
-  const [selected, setSelected] = useState<string | null>(null);
+export function Live({ state, target, catalog, onChange, connected, onTargetChange }: Props) {
+  const [selected, setSelected] = useState<string | null>(() => target.graph.nodes.find(n => n.spof)?.id ?? target.graph.nodes[0]?.id ?? null);
+  const [search, setSearch] = useState("");
   const [pending, setPending] = useState<Prediction | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +75,7 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
   const unit = target.unit;
   const result: ExperimentResult | undefined =
     state.phase === "done" && cur ? state.results.find((r) => r.run_id === cur.run_id) : undefined;
-  const options = catalog.filter((e) => e.target === selected);
+  const options = catalog.filter((e) => e.target === selected && `${e.title} ${e.description} ${e.type}`.toLowerCase().includes(search.toLowerCase()));
   const node = target.graph.nodes.find((n) => n.id === selected);
 
   async function act<T>(name: string, fn: () => Promise<T>): Promise<T | undefined> {
@@ -103,26 +102,24 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
     });
   const kill = () => act("kill", () => api.killswitch());
 
-  const th = cur?.guard.thresholds;
   const faultEnd = !cur
     ? null
-    : cur.guard.tripped && th
-      ? (firstBreach(cur.timeline, th.error_rate, th.p95_ms) ?? cur.elapsed_s)
-      : state.phase === "observe" || state.phase === "inject"
+    : cur.fault_ended_s != null
+      ? cur.fault_ended_s
+      : state.phase === "observe" || state.phase === "inject" || state.phase === "restore"
         ? Math.max(0, cur.elapsed_s)
-        : PHASES.findIndex((p) => p.id === state.phase) > 2
-          ? cur.fault_duration_s
-          : 0;
+        : 0; // legacy runs do not contain measured fault-end timing; do not invent it
   const phaseIndex = PHASES.findIndex((p) => p.id === state.phase);
 
   return (
-    <div>
+    <div className="live-workspace">
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
         <div>
-          <h1 className="wd-wide text-[1.45rem] leading-tight font-semibold sm:text-[1.75rem]">Break one service on purpose</h1>
-          <p data-stage-hide className="mt-1 max-w-[70ch] text-graphite">
-            Pick a service on the map and a failure. The planner commits to a prediction first, the guard keeps the damage
-            inside limits, and every number below is measured from real probe {unit.plural}.
+          <div className="workspace-eyebrow"><Activity size={14} aria-hidden="true" /> RESILIENCE WORKSPACE / {target.name}</div>
+          <h1 className="workspace-title wd-wide font-semibold">Controlled chaos.<span> Measured confidence.</span></h1>
+          <p className="mt-1 max-w-[70ch] text-graphite">
+            Select a service. Predict the impact. Observe recovery — with every {unit.singular} accounted for.
+            {state.runner.kind === "sim" ? " Simulation results, not Docker measurements." : " Live Docker measurements."}
           </p>
         </div>
         <p className="text-sm text-graphite tabular-nums">
@@ -141,14 +138,28 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
         </p>
       </div>
 
+      <div className="overview-metrics" aria-label="Application overview">
+        <div><span>Services running</span><strong>{state.services.filter(s => s.state === "running" && s.health !== "unhealthy").length}<small> / {target.graph.nodes.length}</small></strong><span>Live service state</span></div>
+        <div><span>Baseline error rate</span><strong>{state.baseline ? `${state.baseline.error_pct}%` : "—"}</strong><span>{state.baseline ? `${state.baseline.rps} ${unit.plural}/second` : "Measured before the first run"}</span></div>
+        <div><span>Baseline p95</span><strong>{state.baseline ? ms(state.baseline.p95_ms) : "—"}</strong><span>Steady-load reference</span></div>
+        <div><span>Completed experiments</span><strong>{state.results.length}</strong><span>Prediction → evidence</span></div>
+      </div>
+
+      <div className="experiment-bar">
+        <span className={`session-indicator ${running ? "is-running" : ""}`}><i />{running ? state.phase : "Ready to explore"}</span>
+        <ol aria-label="Experiment progress" className="lifecycle">{PHASES.map((p, i) => <li key={p.id} aria-current={p.id === state.phase ? "step" : undefined} className={p.id === state.phase ? "current" : cur && i < phaseIndex ? "complete" : ""}><span>{cur && i < phaseIndex ? "✓" : i + 1}</span>{p.label}</li>)}</ol>
+        <button className="emergency-control" type="button" disabled={busyAction === "kill"} onClick={kill}><Square size={14} aria-hidden="true" />{busyAction === "kill" ? "Restoring…" : "Stop & restore"}</button>
+      </div>
+
       {(error || state.error) && (
         <p role="alert" className="mt-5 border-l-2 border-crit pl-3 text-crit">{error ?? state.error}</p>
       )}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)_minmax(0,4fr)]">
+      <div className="live-columns mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)_minmax(0,4fr)]">
         {/* choose */}
         <div className="space-y-6">
-          <section aria-labelledby="map-h" className="border border-rule bg-surface p-4">
+          <section aria-labelledby="map-h" className="dashboard-panel map-panel border border-rule bg-surface p-4">
+            <span className="panel-eyebrow"><Network size={14} />01 / Understand</span>
             <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map: {target.name === "hawkbit" ? "Bosch hawkBit" : "voting app"}</h2>
             <p className="mt-1 mb-3 text-[0.8rem] text-graphite">
               {target.graph.nodes.length} services read from <span className="wd-condensed">{target.compose_file}</span>, plus the data flows the compose file does not declare.
@@ -159,17 +170,19 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
               selected={selected}
               target={running ? (cur?.experiment.target ?? null) : null}
               flowing={running || (cur?.counters.sent ?? 0) > 0}
-              disabled={running}
+              disabled={running || busyAction !== null || !connected}
               onSelect={(id) => {
                 setSelected(id);
                 setPending(null);
+                setSearch("");
               }}
             />
           </section>
 
           <div data-stage-hide><MapEditor target={target} disabled={running} onChange={onTargetChange} /></div>
 
-          <section aria-labelledby="choose-h" className="border border-rule bg-surface p-4">
+          <section aria-labelledby="choose-h" className="dashboard-panel scenario-panel border border-rule bg-surface p-4">
+            <span className="panel-eyebrow"><FlaskConical size={14} />Experiment library</span>
             <h2 id="choose-h" className="wd-wide text-base font-semibold">
               {node ? `Break ${node.id}` : "Choose a failure"}
             </h2>
@@ -181,20 +194,22 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
                     <li key={n} className="flex gap-2"><span aria-hidden="true">–</span><span>{n}</span></li>
                   ))}
                 </ul>
+                <label className="scenario-search"><Search size={16} aria-hidden="true" /><span className="sr-only">Filter failures for {selected}</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter failures…" /></label>
                 <div className="mt-4 space-y-2">
+                  {!options.length && <p className="text-sm text-graphite">No matching failures for this service.</p>}
                   {options.map((exp) => (
                     <button
                       key={exp.id}
                       type="button"
-                      disabled={running || busyAction !== null}
+                      disabled={running || busyAction !== null || !connected}
                       onClick={() => choose(exp)}
                       aria-pressed={pending?.experiment_id === exp.id}
-                      className={`w-full border px-3 py-2.5 text-left hover:border-cobalt disabled:opacity-50 ${
+                      className={`scenario-option w-full border px-3 py-2.5 text-left hover:border-cobalt disabled:opacity-50 ${
                         pending?.experiment_id === exp.id ? "border-cobalt bg-cobalt-soft" : "border-rule"
                       }`}
                     >
                       <span className="flex items-baseline justify-between gap-3">
-                        <span className="font-semibold">{exp.title}</span>
+                        <span className="font-semibold">{exp.title}</span><ArrowRight size={15} aria-hidden="true" />
                         <span className="text-xs text-graphite tabular-nums">risk {Math.round(exp.risk_hint * 100)}</span>
                       </span>
                       <span className="mt-0.5 block text-[0.8rem] text-graphite">{exp.description}</span>
@@ -207,13 +222,13 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
         </div>
 
         {/* watch */}
-        <div className="space-y-6">
-          <section aria-labelledby="fleet-h" className="border border-rule bg-surface p-4">
+        <div className="observation-column space-y-6">
+          <section aria-labelledby="fleet-h" className="dashboard-panel fleet-panel border border-rule bg-surface p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 id="fleet-h" className="wd-wide text-base font-semibold">
                 {cur ? cur.experiment.title : `Probe ${unit.plural}`}
               </h2>
-              <ol className="flex flex-wrap gap-x-2.5 text-[0.75rem]" aria-label="Experiment phase">
+              <ol className="sr-only" aria-label="Experiment phase">
                 {PHASES.map((p, i) => (
                   <li
                     key={p.id}
@@ -250,15 +265,18 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
             </div>
           </section>
 
-          <section aria-labelledby="chart-h" className="border border-rule bg-surface p-4">
-            <h2 id="chart-h" className="wd-wide mb-3 text-base font-semibold">Errors and latency</h2>
+          <section aria-labelledby="chart-h" className="dashboard-panel signals-panel border border-rule bg-surface p-4">
+            <span className="panel-eyebrow"><Activity size={14} />02 / Observe</span>
+            <h2 id="chart-h" className="wd-wide mb-3 text-base font-semibold">Impact & recovery</h2>
+            {!cur && <p className="mb-4 text-sm text-graphite">No experiment yet. Signals appear when you start a confirmed run.</p>}
             <LiveChart timeline={cur?.timeline ?? []} faultS={cur?.fault_duration_s ?? 10} faultEnd={faultEnd} guard={cur?.guard ?? null} />
           </section>
         </div>
 
         {/* predict, guard, reveal */}
         <div className="space-y-6">
-          <section aria-labelledby="pred-h" aria-live="polite" className="border border-rule bg-surface p-4">
+          <section aria-labelledby="pred-h" aria-live="polite" className="dashboard-panel prediction-panel border border-rule bg-surface p-4">
+            <span className="panel-eyebrow"><ShieldCheck size={14} />03 / Predict before inject</span>
             <h2 id="pred-h" className="wd-wide mb-2 text-base font-semibold">
               {result ? "Predicted against measured" : "Prediction"}
             </h2>
@@ -281,7 +299,7 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
                   </div>
                 </fieldset>
                 <div className="mt-4 flex gap-3">
-                  <button type="button" onClick={confirm} disabled={busyAction !== null}
+                  <button type="button" onClick={confirm} disabled={busyAction !== null || !connected}
                     className="flex-1 bg-cobalt px-4 py-2.5 font-semibold text-on-cobalt hover:opacity-90 disabled:opacity-60">
                     Confirm and inject
                   </button>
@@ -294,7 +312,8 @@ export function Live({ state, target, catalog, onChange, onTargetChange }: Props
             {!pending && result && <Reveal result={result} unit={unit} human={guesses[result.run_id]} />}
           </section>
 
-          <GuardCard guard={cur?.guard ?? null} last={cur?.timeline[cur.timeline.length - 1]} wallS={Math.max(0, cur?.elapsed_s ?? 0)}
+          <GuardCard guard={cur?.guard ?? null} last={cur?.timeline[cur.timeline.length - 1]} wallS={Math.max(0, cur?.wall_s ?? (cur ? cur.elapsed_s + 1 : 0))}
+            restorationFailed={!!state.error && /restoration failed|Restoration incomplete/.test(state.error)}
             phase={state.phase} busy={running} onKill={kill} killing={busyAction === "kill"} />
         </div>
       </div>
@@ -328,11 +347,11 @@ function History({ results, unit }: { results: ExperimentResult[]; unit: Target[
                 <td className="py-2 pr-3 text-graphite">{r.label}</td>
                 <td className="py-2 pr-3 text-right">{r.outcome.error_pct}%</td>
                 <td className={`py-2 pr-3 text-right ${r.outcome.data_loss ? "font-semibold text-crit" : ""}`}>{r.outcome.lost}</td>
-                <td className="py-2 pr-3 text-right">{r.outcome.recovery_s == null ? "never" : `${r.outcome.recovery_s.toFixed(1)} s`}</td>
+                <td className="py-2 pr-3 text-right">{r.outcome.recovery_s == null ? "not observed" : `${r.outcome.recovery_s.toFixed(1)} s`}</td>
                 <td className="py-2 pr-3">{r.outcome.guard_tripped ? "tripped" : "not needed"}</td>
                 <td className="py-2 text-right text-graphite">
                   {r.prediction_error
-                    ? `${r.prediction_error.errors_pct_points} pts, ${r.prediction_error.votes_lost} ${unit.plural}, ${r.prediction_error.recovery_s} s`
+                    ? `${r.prediction_error.errors_pct_points} pts, ${r.prediction_error.votes_lost} ${unit.plural}, recovery ${r.outcome.recovery_s != null && r.prediction_error.recovery_s != null ? `${r.prediction_error.recovery_s} s` : 'unavailable'}`
                     : "—"}
                 </td>
               </tr>

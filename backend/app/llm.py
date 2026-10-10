@@ -117,7 +117,7 @@ async def complete(
     run_id: str = "",
 ) -> LLMResult:
     hit = cache.get(task, system, prompt, semantic=semantic_cache)
-    if hit and accept is not None and not accept(hit[0]):
+    if hit and accept is not None and not accepted(accept, hit[0]):
         hit = None  # a cached answer must pass today's check too
     if hit:
         text, kind, tin, tout = hit
@@ -142,7 +142,7 @@ async def complete(
         tin = tin or ledger.estimate_tokens(system + prompt)
         tout = tout or ledger.estimate_tokens(text)
         cost = ledger.price(name, tin, tout)
-        ok = accept(text) if accept else bool(text.strip())
+        ok = accepted(accept, text) if accept else bool(text.strip())
         ledger.record(task=task, source=name, model=tier.model, tokens_in=tin, tokens_out=tout, cost_usd=cost,
                       latency_ms=latency, cache="miss", run_id=run_id, accepted=ok)
         if ok:
@@ -150,6 +150,14 @@ async def complete(
             return LLMResult(text, name, tier.model, tin, tout, cost, latency)
         problems.append(f"{name}: answer failed the check")
     raise NoModelAvailable("; ".join(problems) or "no model tier is configured or reachable")
+
+
+def accepted(check: Callable[[str], bool], text: str) -> bool:
+    """Malformed model output is a rejected answer, never a crash of the experiment workflow."""
+    try:
+        return bool(check(text))
+    except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
+        return False
 
 
 def extract_json(text: str) -> dict | None:

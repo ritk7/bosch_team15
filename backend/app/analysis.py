@@ -33,21 +33,21 @@ def rules_findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
         t, plural = exp["target"], unit["plural"]
         if o["lost"] > 0:
             title = f"{o['lost']} acknowledged {plural} {unit['lost']} during “{exp['title']}”"
-            impact = (f"Clients were told their {plural} succeeded (HTTP 200), but they never reached the database. "
+            impact = (f"Clients received successful HTTP responses for their {plural}, but the ids were absent from both storage and the queue. "
                       "An HTTP health check calls this healthy; only checking ids shows the loss.")
         elif o["recovery_s"] is None:
-            title = f"The app does not recover from “{exp['title']}” within 30 s"
-            impact = f"{plural.capitalize()} keep failing or piling up after the fault is removed."
+            title = f"Recovery was not observed after “{exp['title']}”"
+            impact = f"The probe did not establish five consecutive healthy {plural} within the bounded recovery window."
         elif o["guard_tripped"]:
             title = f"“{exp['title']}” breaches the safety limits"
-            impact = f"Without the kill switch, users would keep seeing {o['error_pct']}% errors and slow responses."
+            impact = f"The measured run reached a safety threshold and triggered restoration; overall errors were {o['error_pct']}%."
         else:
             title = f"“{exp['title']}” degrades service: {o['error_pct']}% errors, recovery {o['recovery_s']} s"
             impact = "Users notice errors or delays while the fault lasts."
         evidence = [
             f"{exp['id']}: {o['sent']} sent, {o['acked']} acknowledged, {o['stored']} {unit['stored']}, {o['lost']} {unit['lost']}",
             f"errors {o['error_pct']}%, peak p95 {round(o['peak_p95_ms'])} ms, recovery "
-            f"{'never (30 s cap)' if o['recovery_s'] is None else str(o['recovery_s']) + ' s'}",
+            f"{'not observed (bounded recovery window)' if o['recovery_s'] is None else str(o['recovery_s']) + ' s'}",
         ]
         if o["guard_tripped"]:
             evidence.append(f"guard: {o['guard_reason']}")
@@ -80,13 +80,14 @@ async def findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
     def accept(text: str) -> bool:
         d = llm.extract_json(text) or {}
         rows = d.get("findings")
-        if not isinstance(rows, list) or {r.get("id") for r in rows if isinstance(r, dict)} != set(by_id):
+        if (not isinstance(rows, list) or len(rows) != len(by_id) or not all(isinstance(r, dict) for r in rows)
+                or not all(isinstance(r.get("id"), str) for r in rows) or {r.get("id") for r in rows} != set(by_id)):
             return False
         for r in rows:
             allowed = _numbers(" ".join(by_id[r["id"]]["evidence"]) + " " + by_id[r["id"]]["title"])
-            if not str(r.get("title", "")).strip() or not str(r.get("impact", "")).strip():
+            if not all(isinstance(r.get(key), str) and r[key].strip() for key in ("title", "impact")):
                 return False
-            if not _numbers(str(r["title"]) + " " + str(r["impact"])) <= allowed | {"5", "30", "200"}:
+            if not _numbers(r["title"] + " " + r["impact"]) <= allowed:
                 return False  # invented a number
         return True
 
@@ -127,19 +128,30 @@ def rules_fixes(found: list[dict], results: list[dict], graph: dict) -> list[dic
                 restart_targets.setdefault(s, []).append(f["id"])
         if o["lost"] > 0 and any(nodes.get(s, {}).get("role") in ("queue", "cache") for s in services):
             q = next(s for s in services if nodes.get(s, {}).get("role") in ("queue", "cache"))
-            fixes.append({"id": "", "finding_id": f["id"], "title": f"Make the {q} queue durable (append-only file)",
+            redis = "redis" in str(nodes[q].get("image", "")).lower()
+            fixes.append({"id": "", "finding_id": f["id"], "title": f"Make the {q} queue durable" + (" (append-only file)" if redis else " (verify broker persistence)"),
                           "change_type": "config",
-                          "snippet": f"services:\n  {q}:\n    command: [\"redis-server\", \"--appendonly\", \"yes\", \"--appendfsync\", \"always\"]\n"
-                                     f"    volumes:\n      - {q}-data:/data\nvolumes:\n  {q}-data:",
-                          "steps": [f"Persist {q} to disk on every write so acknowledged units survive a crash.",
-                                    "Better still: have the consumer use a reliable-queue pattern (LMOVE to a processing list, "
-                                    "delete only after the database write)."],
+                          "snippet": (f"services:\n  {q}:\n    command: [\"redis-server\", \"--appendonly\", \"yes\", \"--appendfsync\", \"always\"]\n"
+                                     f"    volumes:\n      - {q}-data:/data\nvolumes:\n  {q}-data:") if redis else (
+                                     f"# Implementation checklist, not a drop-in config\n# Broker: {q}\n"
+                                     "# Verify persistent storage, durable queues and persistent messages.\n"
+                                     "# Confirm publishes and acknowledge consumption only after successful processing."),
+                          "steps": [f"Verify {q} persistence against the broker's documented configuration.",
+                                    "Use the broker's reliable delivery and acknowledgement mechanisms; test crash recovery by id."],
                           "expected_score_gain": round(min(30.0, 20 + 10 * min(1.0, o["lost"] / 50)), 1), "auto_applicable": False})
         if o["peak_p95_ms"] >= 3000 and nodes.get(exp["target"], {}).get("role") in ("queue", "cache", "database"):
+            dep = exp["target"]
+            is_voting_redis = "vote" in nodes and "redis" in str(nodes[dep].get("image", "")).lower()
+            consumers = sorted({e["from"] for e in graph["edges"] if e["kind"] == "dataflow" and e["to"] == dep})
+            snippet = ("# vote/app.py\nRedis(host=\"redis\", socket_timeout=1, socket_connect_timeout=1,\n"
+                       "      retry_on_timeout=True)  # return HTTP 503 with Retry-After instead of hanging") if is_voting_redis else (
+                f"# Implementation checklist, not a drop-in config\n# Dependency: {dep}; callers: {', '.join(consumers) or 'application'}\n"
+                "# Bound connection, pool-acquisition and read waits in this application's client library.\n"
+                "# Return a controlled unavailable response; make retries bounded and idempotent.\n"
+                "# Validate settings against the deployed driver and framework version.")
             fixes.append({"id": "", "finding_id": f["id"], "title": f"Fail fast when {exp['target']} is unreachable",
                           "change_type": "code",
-                          "snippet": "# vote/app.py\nRedis(host=\"redis\", socket_timeout=1, socket_connect_timeout=1,\n"
-                                     "      retry_on_timeout=True)  # then return HTTP 503 with Retry-After instead of hanging",
+                          "snippet": snippet,
                           "steps": ["Short connect and read timeouts so requests do not hang for seconds.",
                                     "Return 503 with Retry-After, so clients retry instead of waiting."],
                           "expected_score_gain": 5.0, "auto_applicable": False})
@@ -172,16 +184,20 @@ async def recommend(found: list[dict], results: list[dict], graph: dict) -> tupl
     if not fixes:
         return fixes, "rules", "rules engine"
     prompt = json.dumps({"findings": [{k: f[k] for k in ("id", "title", "impact")} for f in found],
-                         "fixes": [{k: x[k] for k in ("id", "title", "change_type", "steps")} for x in fixes]},
+                         "services": list(n["id"] for n in graph["nodes"]),
+                         "fixes": [{k: x[k] for k in ("id", "title", "change_type", "snippet", "steps")} for x in fixes]},
                         separators=(",", ":"))
     system = ("You review resilience fixes. For each fix, write 2-3 short concrete steps an engineer follows. Keep ids. "
+              "Use only the given application's services, libraries and implementation checklist; do not substitute a different stack. "
               'Reply JSON only: {"fixes":[{"id":"X1","steps":["...","..."]}]}')
     ids = {x["id"] for x in fixes}
 
     def accept(text: str) -> bool:
         rows = (llm.extract_json(text) or {}).get("fixes")
-        return (isinstance(rows, list) and {r.get("id") for r in rows if isinstance(r, dict)} == ids
-                and all(isinstance(r.get("steps"), list) and 1 <= len(r["steps"]) <= 4 for r in rows))
+        return (isinstance(rows, list) and len(rows) == len(ids) and all(isinstance(r, dict) for r in rows)
+                and all(isinstance(r.get("id"), str) for r in rows) and {r.get("id") for r in rows} == ids
+                and all(isinstance(r.get("steps"), list) and 1 <= len(r["steps"]) <= 4
+                        and all(isinstance(s, str) and s.strip() for s in r["steps"]) for r in rows))
 
     try:
         res = await asyncio.wait_for(llm.complete("fix", prompt, system=system, max_tokens=700, min_tier="small",

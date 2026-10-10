@@ -2,10 +2,10 @@ import type { Graph, GraphNode, ServiceState, ServiceStatus } from "../lib/api";
 
 // Dependency map. Callers sit above the services they call; each node shows its live state as a word and a mark,
 // so colour is never the only signal.
-const W = 116;
-const H = 62;
+const W = 132;
+const H = 78;
 const VIEW_W = 420;
-const ROW_GAP = 150;
+const ROW_GAP = 110;
 const TOP = 26;
 
 interface Props {
@@ -203,12 +203,12 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
               <text x={x + 12} y={y + 22} className="wd-wide fill-ink text-[15px] font-semibold">
                 {n.id}
               </text>
-              <text x={x + W - 10} y={y + 22} textAnchor="end" className="fill-graphite text-[11px]">
+              <text x={x + 12} y={y + 38} className="fill-graphite text-[11px]">
                 {n.role}
               </text>
               <g className={tone(s?.state, s?.health)}>
-                <Mark state={s?.state} x={x + 16} y={y + 42} />
-                <text x={x + 27} y={y + 46} className="fill-current text-[12px]">
+                <Mark state={s?.state} x={x + 16} y={y + 57} />
+                <text x={x + 27} y={y + 61} className="fill-current text-[12px]">
                   {word}
                 </text>
               </g>
@@ -219,7 +219,7 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
                 </text>
               )}
               {n.spof && (
-                <text x={x + W - 10} y={y + 46} textAnchor="end" className="fill-graphite text-[10px]">
+                <text x={x + W - 8} y={y + 13} textAnchor="end" className="fill-graphite text-[8px]">
                   <title>Single point of failure: one replica, used by {n.fan_in} services</title>
                   SPOF
                 </text>

@@ -2,7 +2,7 @@ import type { ExperimentResult, Prediction, Unit } from "../lib/api";
 import { SOURCE_LABEL } from "../lib/format";
 
 // Before the run: what the planner commits to. After the run: predicted next to measured, with the difference.
-const fmtS = (v: number | null) => (v == null ? "never" : `${v.toFixed(1)} s`);
+const fmtS = (v: number | null) => (v == null ? "not observed" : `${v.toFixed(1)} s`);
 
 function signed(v: number, unit = "") {
   if (v === 0) return `0${unit}`;
@@ -44,10 +44,11 @@ export function Reveal({ result, unit, human }: { result: ExperimentResult; unit
     { k: `${unit.plural[0].toUpperCase()}${unit.plural.slice(1)} ${unit.lost}`, pred: p ? String(p.expected_votes_lost) : "—",
       act: String(o.lost), diff: result.prediction_error ? signed(result.prediction_error.votes_lost) : null, bad: o.data_loss },
     { k: "Recovery", pred: p ? `${p.expected_recovery_s.toFixed(1)} s` : "—", act: fmtS(o.recovery_s),
-      diff: result.prediction_error ? signed(result.prediction_error.recovery_s, " s") : null, bad: o.recovery_s == null },
+      diff: o.recovery_s != null && result.prediction_error?.recovery_s != null ? signed(result.prediction_error.recovery_s, " s") : null, bad: o.recovery_s == null },
   ];
   return (
     <div>
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <caption className="sr-only">Predicted against measured for {result.experiment.title}</caption>
         <thead>
@@ -69,6 +70,7 @@ export function Reveal({ result, unit, human }: { result: ExperimentResult; unit
           ))}
         </tbody>
       </table>
+      </div>
       {human && p && (() => {
         const humanOff = Math.abs(human.err - o.error_pct) + Math.abs(human.lost - o.lost) * 2;
         const aiOff = Math.abs(p.expected_error_pct - o.error_pct) + Math.abs(p.expected_votes_lost - o.lost) * 2;
