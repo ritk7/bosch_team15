@@ -2,11 +2,17 @@ import type { Graph, GraphNode, ServiceState, ServiceStatus } from "../lib/api";
 
 // Dependency map. Callers sit above the services they call; each node shows its live state as a word and a mark,
 // so colour is never the only signal.
-const W = 132;
-const H = 78;
-const VIEW_W = 420;
-const ROW_GAP = 110;
-const TOP = 26;
+const W = 128;
+const H = 54;
+const VIEW_W = 600;
+const ROW_GAP = 132;
+const TOP = 30;
+
+// a gentle S-curve from the bottom of the caller to the top of the callee
+const curve = (x1: number, y1: number, x2: number, y2: number) => {
+  const m = (y1 + y2) / 2;
+  return `M${x1},${y1} C${x1},${m} ${x2},${m} ${x2},${y2}`;
+};
 
 interface Props {
   graph: Graph;
@@ -15,6 +21,7 @@ interface Props {
   target: string | null; // the service under fault right now
   disabled: boolean;
   flowing?: boolean; // animate units moving along the data flows
+  culprits?: string[]; // services the last run broke, kept outlined after restore so the map tells the story
   onSelect: (id: string) => void;
 }
 
@@ -90,7 +97,7 @@ function Mark({ state, x, y }: { state: ServiceState | undefined; x: number; y: 
   return <circle cx={x} cy={y} r={4} fill="none" stroke="currentColor" strokeWidth={2} />;
 }
 
-export function ServiceMap({ graph, services, selected, target, disabled, flowing = true, onSelect }: Props) {
+export function ServiceMap({ graph, services, selected, target, disabled, flowing = true, culprits = [], onSelect }: Props) {
   const { pos, height } = layout(graph);
   const status = new Map(services.map((s) => [s.id, s]));
   // draw one line per pair, preferring the data flow over the start-order edge
@@ -123,12 +130,12 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
               <g key={`pile-${e.from}-${e.to}`} className="fill-crit" aria-hidden="true">
                 {[0, 1, 2, 3, 4].map((k) => {
                   const f = 0.86 - k * 0.07;
-                  return <circle key={k} cx={x1 + (x2 - x1) * f + (k % 2 ? 3 : -3)} cy={y1 + (y2 - y1) * f} r={2.6} className="animate-pulse" />;
+                  return <circle key={k} cx={x2 + (k % 2 ? 4 : -4) * (k + 1) * 0.6} cy={y2 - (1 - f) * 60} r={2.8} className="animate-pulse" />;
                 })}
               </g>
             );
           }
-          const d = `M${x1},${y1} L${x2},${y2}`;
+          const d = curve(x1, y1, x2, y2);
           return (
             <g key={`flow-${e.from}-${e.to}`} aria-hidden="true">
               {[0, 1, 2].map((k) => (
@@ -144,25 +151,24 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
           const b = pos.get(e.to)!;
           const hot = target != null && (e.from === target || e.to === target);
           return (
-            <line
+            <path
               key={`${e.from}-${e.to}`}
-              x1={a.x}
-              y1={a.y + H / 2}
-              x2={b.x}
-              y2={b.y - H / 2 - 3}
-              className={hot ? "stroke-crit" : "stroke-graphite"}
-              strokeWidth={e.kind === "dataflow" ? 1.5 : 1}
+              d={curve(a.x, a.y + H / 2, b.x, b.y - H / 2 - 3)}
+              fill="none"
+              className={hot ? "stroke-crit" : e.kind === "dataflow" ? "stroke-graphite" : "stroke-rule"}
+              strokeWidth={e.kind === "dataflow" ? 1.6 : 1}
               strokeDasharray={e.kind === "dataflow" ? undefined : "4 4"}
               markerEnd="url(#arrow)"
             >
               <title>{`${e.from} → ${e.to}: ${e.label}`}</title>
-            </line>
+            </path>
           );
         })}
         {graph.nodes.map((n) => {
           const p = pos.get(n.id)!;
           const s = status.get(n.id);
           const isSel = selected === n.id;
+          const culprit = culprits.includes(n.id) && target == null;
           const blast = target != null && n.id !== target && graph.edges.some((e) => e.kind === "dataflow" && e.from === n.id && e.to === target);
           const x = p.x - W / 2;
           const y = p.y - H / 2;
@@ -184,14 +190,20 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
               }}
               className={`group outline-none ${disabled ? "cursor-default" : "cursor-pointer"}`}
             >
-              {isSel && <rect x={x - 5} y={y - 5} width={W + 10} height={H + 10} rx={8} className="fill-none stroke-cobalt" strokeWidth={2} />}
+              {culprit && (
+                <g className="pointer-events-none">
+                  <rect x={x - 5} y={y - 5} width={W + 10} height={H + 10} rx={9} className="fill-none stroke-crit" strokeWidth={2} />
+                  <text x={p.x} y={y - 10} textAnchor="middle" className="fill-crit text-[10px] font-semibold">faulted in this run</text>
+                </g>
+              )}
+              {isSel && !culprit && <rect x={x - 5} y={y - 5} width={W + 10} height={H + 10} rx={8} className="fill-none stroke-cobalt" strokeWidth={2} />}
               {blast && <rect x={x - 4} y={y - 4} width={W + 8} height={H + 8} rx={7} className="fill-none stroke-warn" strokeWidth={1.5} strokeDasharray="3 3"><title>In the blast radius: depends on {target}</title></rect>}
               <rect
                 x={x}
                 y={y}
                 width={W}
                 height={H}
-                rx={5}
+                rx={8}
                 className={`fill-surface ${s?.state === "stopped" ? "stroke-crit" : "stroke-rule"} ${
                   disabled ? "" : "group-hover:stroke-cobalt group-focus-visible:stroke-cobalt"
                 }`}
@@ -202,24 +214,18 @@ export function ServiceMap({ graph, services, selected, target, disabled, flowin
               )}
               <text x={x + 12} y={y + 22} className="wd-wide fill-ink text-[15px] font-semibold">
                 {n.id}
-              </text>
-              <text x={x + 12} y={y + 38} className="fill-graphite text-[11px]">
-                {n.role}
+                {n.role !== n.id && <tspan dx={6} className="fill-graphite text-[10px] font-normal">{n.role}</tspan>}
               </text>
               <g className={tone(s?.state, s?.health)}>
-                <Mark state={s?.state} x={x + 16} y={y + 57} />
-                <text x={x + 27} y={y + 61} className="fill-current text-[12px]">
+                <Mark state={s?.state} x={x + 16} y={y + 39} />
+                <text x={x + 26} y={y + 43} className="fill-current text-[11px]">
                   {word}
                 </text>
               </g>
-              {s?.mem_mb != null && (
-                <text x={x + W - 10} y={y + H + 13} textAnchor="end" className="fill-graphite text-[10px] tabular-nums">
-                  <title>Measured by docker stats</title>
-                  {s.cpu_pct?.toFixed(0)}% CPU · {Math.round(s.mem_mb)} MB
-                </text>
-              )}
+              {/* measured container load lives in the node's tooltip, so it never collides with the wires */}
+              {s?.mem_mb != null && <title>{`${n.id}: ${s.cpu_pct?.toFixed(0)}% CPU, ${Math.round(s.mem_mb)} MB (docker stats)`}</title>}
               {n.spof && (
-                <text x={x + W - 8} y={y + 13} textAnchor="end" className="fill-graphite text-[8px]">
+                <text x={x + W - 8} y={y + 13} textAnchor="end" className="fill-warn text-[8px] font-semibold">
                   <title>Single point of failure: one replica, used by {n.fan_in} services</title>
                   SPOF
                 </text>

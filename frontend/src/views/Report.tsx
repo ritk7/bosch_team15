@@ -51,7 +51,7 @@ export function Report({ version }: { version: string }) {
         <a href="/api/report.md" className="bg-cobalt px-4 py-2 font-semibold text-on-cobalt hover:opacity-90">Download findings report</a>
         <a href="/api/architecture.md" className="border border-cobalt px-4 py-2 font-semibold text-cobalt hover:bg-cobalt-soft">Download architecture overview</a>
       </div>
-      <article className="mt-4 border border-rule bg-surface p-5 sm:p-8"><Markdown text={md} /></article>
+      <article className="mt-4 deck-panel sm:p-8"><Markdown text={md} /></article>
     </div>
   );
 }

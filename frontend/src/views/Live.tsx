@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, ArrowRight, Search, ShieldCheck, Square, Network, FlaskConical } from "lucide-react";
+import { Activity, Search, ShieldCheck, Square, Network, FlaskConical } from "lucide-react";
 import { FleetGrid } from "../components/FleetGrid";
 import { GuardCard } from "../components/GuardCard";
 import { LiveChart } from "../components/LiveChart";
@@ -46,7 +46,7 @@ function MapEditor({ target, disabled, onChange }: { target: Target; disabled: b
     }
   }
   return (
-    <details className="border border-rule bg-surface p-4">
+    <details className="deck-panel">
       <summary className="cursor-pointer text-sm font-semibold">Correct the map by hand</summary>
       <p className="mt-1 text-[0.8rem] text-graphite">Add a data flow the tool missed, or remove a wrong one. Saved next to the compose file.</p>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
@@ -111,227 +111,174 @@ export function Live({ state, target, catalog, onChange, connected, onTargetChan
         : 0; // legacy runs do not contain measured fault-end timing; do not invent it
   const phaseIndex = PHASES.findIndex((p) => p.id === state.phase);
 
+  // services the finished run broke: its target plus any service its title names (compound runs hit two)
+  const culprits = result && (result.outcome.lost > 0 || result.outcome.errors > 0 || result.outcome.recovery_s == null)
+    ? target.graph.nodes.map((n) => n.id).filter((id) => id === result.experiment.target || new RegExp(`\\b${id}\\b`, "i").test(result.experiment.title))
+    : [];
+  const guardActive = running || !!cur?.guard?.tripped;
+  const th = cur?.guard?.thresholds ?? { error_rate: 0.6, p95_ms: 3000, unhealthy: 2, max_wall_s: 45 };
+  const c = cur?.counters;
+  const secondsLeft = cur?.guard && cur.guard.armed && !cur.guard.tripped ? cur.guard.seconds_left : null;
+
   return (
-    <div className="live-workspace">
-      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
-        <div>
-          <div className="workspace-eyebrow"><Activity size={14} aria-hidden="true" /> RESILIENCE WORKSPACE / {target.name}</div>
-          <h1 className="workspace-title wd-wide font-semibold">Controlled chaos.<span> Measured confidence.</span></h1>
-          <p className="mt-1 max-w-[70ch] text-graphite">
-            Select a service. Predict the impact. Observe recovery — with every {unit.singular} accounted for.
-            {state.runner.kind === "sim" ? " Simulation results, not Docker measurements." : " Live Docker measurements."}
-          </p>
+    <div className="live-workspace deck">
+      {/* sticky status strip: what is running, where it is, the live counters and the stop control */}
+      <section className="deck-strip" aria-label="Experiment status">
+        <div className="deck-strip-title">
+          <span className={`session-indicator ${running ? "is-running" : ""}`}><i />{running ? state.phase : result ? "done" : "ready"}</span>
+          <strong>{cur ? cur.experiment.title : "Pick a service on the map to begin"}</strong>
         </div>
-        <p className="text-sm text-graphite tabular-nums">
-          {state.baseline ? (
-            <>
-              Baseline: <span className="text-ink">{state.baseline.rps} {unit.plural}/s</span>,{" "}
-              <span className="text-ink">{state.baseline.error_pct}% errors</span>, p95{" "}
-              <span className="text-ink">{ms(state.baseline.p95_ms)}</span>
-              {state.baseline.total_services != null && (
-                <>, <span className="text-ink">{state.baseline.healthy_services}/{state.baseline.total_services} services healthy</span></>
-              )}
-            </>
-          ) : (
-            "Baseline is measured before the first experiment."
-          )}
-        </p>
-      </div>
-
-      <div className="overview-metrics" aria-label="Application overview">
-        <div><span>Services running</span><strong>{state.services.filter(s => s.state === "running" && s.health !== "unhealthy").length}<small> / {target.graph.nodes.length}</small></strong><span>Live service state</span></div>
-        <div><span>Baseline error rate</span><strong>{state.baseline ? `${state.baseline.error_pct}%` : "—"}</strong><span>{state.baseline ? `${state.baseline.rps} ${unit.plural}/second` : "Measured before the first run"}</span></div>
-        <div><span>Baseline p95</span><strong>{state.baseline ? ms(state.baseline.p95_ms) : "—"}</strong><span>Steady-load reference</span></div>
-        <div><span>Completed experiments</span><strong>{state.results.length}</strong><span>Prediction → evidence</span></div>
-      </div>
-
-      <div className="experiment-bar">
-        <span className={`session-indicator ${running ? "is-running" : ""}`}><i />{running ? state.phase : "Ready to explore"}</span>
         <ol aria-label="Experiment progress" className="lifecycle">{PHASES.map((p, i) => {
           // only phases this run really entered get a check mark; a refused start never shows Inject as done
           const reached = cur?.phases ? cur.phases.includes(p.id) : cur != null && i < phaseIndex;
           const isCurrent = p.id === state.phase && (p.id !== "done" || reached || !cur?.phases);
-          const done = reached && !isCurrent;
-          return <li key={p.id} aria-current={isCurrent ? "step" : undefined} className={isCurrent ? "current" : done ? "complete" : ""}><span>{done ? "✓" : i + 1}</span>{p.label}</li>;
+          const done = (reached && !isCurrent) || (p.id === "done" && !!result);
+          return <li key={p.id} aria-current={isCurrent ? "step" : undefined} className={done ? "complete" : isCurrent ? "current" : ""}><span>{done ? "✓" : i + 1}</span>{p.label}</li>;
         })}</ol>
+        <dl className="deck-counters" aria-label="Live counters">
+          <div><dt>Sent</dt><dd>{c?.sent ?? 0}</dd></div>
+          <div><dt>{cap(unit.stored)}</dt><dd className={c && c.stored ? "is-ok" : ""}>{c?.stored ?? 0}</dd></div>
+          <div><dt>{cap(unit.lost)}</dt><dd className={c && c.lost ? "is-crit" : ""}>{c?.lost ?? 0}</dd></div>
+          <div><dt>Errors</dt><dd className={c && c.errors ? "is-crit" : ""}>{c?.errors ?? 0}</dd></div>
+        </dl>
+        {secondsLeft != null && <div className="deck-countdown" aria-live="polite"><strong>{secondsLeft.toFixed(1)}</strong><span>s left</span></div>}
         {running && <button className="emergency-control" type="button" disabled={busyAction === "kill"} onClick={kill}><Square size={14} aria-hidden="true" />{busyAction === "kill" ? "Restoring…" : "Stop & restore"}</button>}
-      </div>
+      </section>
 
       {(error || state.error) && (
-        <p role="alert" className="mt-5 border-l-2 border-crit pl-3 text-crit">{error ?? state.error}</p>
+        <p role="alert" className="deck-alert">{error ?? state.error}</p>
       )}
 
-      <div className="live-columns mt-6 grid gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)_minmax(0,4fr)]">
-        {/* choose */}
-        <div className="space-y-6">
-          <section aria-labelledby="map-h" className="dashboard-panel map-panel border border-rule bg-surface p-4">
-            <span className="panel-eyebrow"><Network size={14} />01 / Understand</span>
-            <h2 id="map-h" className="wd-wide text-base font-semibold">Dependency map: {target.name === "hawkbit" ? "Bosch hawkBit" : "voting app"}</h2>
-            <p className="mt-1 mb-3 text-[0.8rem] text-graphite">
-              {target.graph.nodes.length} services read from <span className="wd-condensed">{target.compose_file}</span>, plus the data flows the compose file does not declare.
-            </p>
-            <ServiceMap
-              graph={target.graph}
-              services={state.services}
-              selected={selected}
-              target={running ? (cur?.experiment.target ?? null) : null}
-              flowing={running || (cur?.counters.sent ?? 0) > 0}
-              disabled={running || busyAction !== null || !connected}
-              onSelect={(id) => {
-                setSelected(id);
-                setPending(null);
-                setSearch("");
-              }}
-            />
-          </section>
+      <div className="deck-grid">
+        {/* hero: the dependency map, big enough to read from across a room */}
+        <section aria-labelledby="map-h" className="deck-panel deck-map">
+          <header className="deck-panel-head">
+            <h2 id="map-h"><Network size={16} aria-hidden="true" />{target.name === "hawkbit" ? "Bosch hawkBit" : "Voting app"}: dependency map</h2>
+            <span className="deck-meta">
+              {state.baseline
+                ? <>baseline {state.baseline.rps} {unit.plural}/s · {state.baseline.error_pct}% errors · p95 {ms(state.baseline.p95_ms)}</>
+                : <>{target.graph.nodes.length} services · {target.graph.edges.filter(e => e.kind === "dataflow").length} data flows</>}
+            </span>
+          </header>
+          <ServiceMap
+            graph={target.graph}
+            services={state.services}
+            selected={selected}
+            target={running ? (cur?.experiment.target ?? null) : null}
+            flowing={running}
+            culprits={culprits}
+            disabled={running || busyAction !== null || !connected}
+            onSelect={(id) => {
+              setSelected(id);
+              setPending(null);
+              setSearch("");
+            }}
+          />
+        </section>
 
-          <div data-stage-hide><MapEditor target={target} disabled={running} onChange={onTargetChange} /></div>
-
-          <section aria-labelledby="choose-h" className="dashboard-panel scenario-panel border border-rule bg-surface p-4">
-            <span className="panel-eyebrow"><FlaskConical size={14} />Experiment library</span>
-            <h2 id="choose-h" className="wd-wide text-base font-semibold">
-              {node ? `Break ${node.id}` : "Choose a failure"}
-            </h2>
-            {!node && <p className="mt-1 text-sm text-graphite">Click a service on the map, or focus it and press Enter.</p>}
-            {node && (
-              <>
-                <ul className="mt-2 space-y-1 text-[0.8rem] text-graphite">
-                  {node.notes.map((n) => (
-                    <li key={n} className="flex gap-2"><span aria-hidden="true">–</span><span>{n}</span></li>
-                  ))}
-                </ul>
-                <label className="scenario-search"><Search size={16} aria-hidden="true" /><span className="sr-only">Filter failures for {selected}</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter failures…" /></label>
-                <div className="mt-4 space-y-2">
-                  {!options.length && <p className="text-sm text-graphite">No matching failures for this service.</p>}
-                  {options.map((exp) => (
-                    <button
-                      key={exp.id}
-                      type="button"
-                      disabled={running || busyAction !== null || !connected}
-                      onClick={() => choose(exp)}
-                      aria-pressed={pending?.experiment_id === exp.id}
-                      className={`scenario-option w-full border px-3 py-2.5 text-left hover:border-cobalt disabled:opacity-50 ${
-                        pending?.experiment_id === exp.id ? "border-cobalt bg-cobalt-soft" : "border-rule"
-                      }`}
-                    >
-                      <span className="flex items-baseline justify-between gap-3">
-                        <span className="font-semibold">{exp.title}</span><ArrowRight size={15} aria-hidden="true" />
-                        <span className="text-xs text-graphite tabular-nums">risk {Math.round(exp.risk_hint * 100)}</span>
-                      </span>
-                      <span className="mt-0.5 block text-[0.8rem] text-graphite">{exp.description}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
+        {/* the story: prediction before, reveal after, and the guard that keeps it safe */}
+        <div className="deck-side">
+          <section aria-labelledby="pred-h" aria-live="polite" className="deck-panel prediction-panel">
+            <header className="deck-panel-head">
+              <h2 id="pred-h"><ShieldCheck size={16} aria-hidden="true" />{result ? "Predicted vs measured" : "Prediction"}</h2>
+              {pending && <span className="deck-meta">before anything is touched</span>}
+            </header>
+            {result && result.outcome.lost > 0 && (
+              <div className="deck-loss" role="status">
+                <strong>{result.outcome.lost}</strong>
+                <span>{result.outcome.lost === 1 ? unit.singular : unit.plural} {unit.lost}<em>every one was acknowledged with HTTP 200</em></span>
+              </div>
             )}
-          </section>
-        </div>
-
-        {/* watch */}
-        <div className="observation-column space-y-6">
-          <section aria-labelledby="fleet-h" className="dashboard-panel fleet-panel border border-rule bg-surface p-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 id="fleet-h" className="wd-wide text-base font-semibold">
-                {cur ? cur.experiment.title : `Probe ${unit.plural}`}
-              </h2>
-              <ol className="sr-only" aria-label="Experiment phase">
-                {PHASES.map((p, i) => (
-                  <li
-                    key={p.id}
-                    aria-current={p.id === state.phase ? "step" : undefined}
-                    className={
-                      p.id === state.phase
-                        ? "font-semibold text-cobalt underline decoration-2 underline-offset-4"
-                        : cur && (cur.phases ? cur.phases.includes(p.id) : i < phaseIndex)
-                          ? "text-ink"
-                          : "text-graphite"
-                    }
-                  >
-                    {p.label}
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <dl className="mt-4 grid grid-cols-5 gap-2 border-b border-rule pb-4">
-              {[
-                ["Sent", cur?.counters.sent ?? 0, ""],
-                ["Acknowledged", cur?.counters.acked ?? 0, ""],
-                [cap(unit.stored), cur?.counters.stored ?? 0, ""],
-                [cap(unit.lost), cur?.counters.lost ?? 0, "text-crit"],
-                ["Errors", cur?.counters.errors ?? 0, "text-crit"],
-              ].map(([k, v, c]) => (
-                <div key={k as string} className="min-w-0">
-                  <dt className="truncate text-[0.72rem] text-graphite">{k}</dt>
-                  <dd className={`wd-wide m-0 text-[1.35rem] leading-tight font-semibold tabular-nums ${(v as number) > 0 ? c : ""}`}>{v}</dd>
-                </div>
-              ))}
-            </dl>
-            <div className="mt-4">
-              <FleetGrid fleet={cur?.fleet ?? []} unit={unit} />
-            </div>
-          </section>
-
-          <section aria-labelledby="chart-h" className="dashboard-panel signals-panel border border-rule bg-surface p-4">
-            <span className="panel-eyebrow"><Activity size={14} />02 / Observe</span>
-            <h2 id="chart-h" className="wd-wide mb-3 text-base font-semibold">Impact & recovery</h2>
-            {!cur && <p className="mb-4 text-sm text-graphite">No experiment yet. Signals appear when you start a confirmed run.</p>}
-            <LiveChart timeline={cur?.timeline ?? []} faultS={cur?.fault_duration_s ?? 10} faultEnd={faultEnd} guard={cur?.guard ?? null} />
-          </section>
-        </div>
-
-        {/* predict, guard, reveal */}
-        <div className="space-y-6">
-          <section aria-labelledby="pred-h" aria-live="polite" className="dashboard-panel prediction-panel border border-rule bg-surface p-4">
-            <span className="panel-eyebrow"><ShieldCheck size={14} />03 / Predict before inject</span>
-            <h2 id="pred-h" className="wd-wide mb-2 text-base font-semibold">
-              {result ? "Predicted against measured" : "Prediction"}
-            </h2>
-            {busyAction === "predict" && <p className="text-sm text-graphite">The planner is working out what will happen…</p>}
+            {busyAction === "predict" && <p className="deck-muted">The planner is working out what will happen…</p>}
             {!pending && !cur && busyAction !== "predict" && (
-              <p className="text-sm text-graphite">The planner states its expected errors, {unit.plural} lost and recovery time before anything is touched.</p>
+              <p className="deck-muted">Choose a failure below the map. The AI commits to errors, {unit.plural} lost and recovery time first; then you confirm.</p>
             )}
             {pending && !running && (
               <>
                 <PredictionCard prediction={pending} unit={unit} />
-                <fieldset className="mt-4 border-t border-rule pt-3">
-                  <legend className="text-[0.8rem] font-semibold">Your guess (optional): human against AI</legend>
-                  <div className="mt-2 grid grid-cols-2 gap-3 text-[0.8rem]">
-                    <label className="text-graphite">Errors <span className="font-semibold text-ink tabular-nums">{guess.err}%</span>
-                      <input type="range" min={0} max={100} step={5} value={guess.err} onChange={(e) => setGuess({ ...guess, err: Number(e.target.value) })} className="mt-1 w-full accent-[var(--color-cobalt)]" />
-                    </label>
-                    <label className="text-graphite">{cap(unit.plural)} lost
-                      <input type="number" min={0} max={500} value={guess.lost} onChange={(e) => setGuess({ ...guess, lost: Math.max(0, Number(e.target.value)) })} className="mt-1 w-full border border-rule bg-surface px-2 py-1 text-ink tabular-nums" />
-                    </label>
-                  </div>
+                <fieldset className="deck-guess">
+                  <legend>Your guess: human against AI</legend>
+                  <label>Errors <b>{guess.err}%</b>
+                    <input type="range" min={0} max={100} step={5} value={guess.err} onChange={(e) => setGuess({ ...guess, err: Number(e.target.value) })} />
+                  </label>
+                  <label>{cap(unit.plural)} lost
+                    <input type="number" min={0} max={500} value={guess.lost} onChange={(e) => setGuess({ ...guess, lost: Math.max(0, Number(e.target.value)) })} />
+                  </label>
                 </fieldset>
-                <div className="mt-4 flex gap-3">
-                  <button type="button" onClick={confirm} disabled={busyAction !== null || !connected}
-                    className="flex-1 bg-cobalt px-4 py-2.5 font-semibold text-on-cobalt hover:opacity-90 disabled:opacity-60">
-                    Confirm and inject
-                  </button>
-                  <button type="button" onClick={() => setPending(null)} className="px-3 text-graphite hover:text-ink">Cancel</button>
+                <div className="deck-actions">
+                  <button type="button" className="deck-primary" onClick={confirm} disabled={busyAction !== null || !connected}>Confirm and inject</button>
+                  <button type="button" className="deck-ghost" onClick={() => setPending(null)}>Cancel</button>
                 </div>
               </>
             )}
             {!pending && cur && !result && (cur.prediction ? <PredictionCard prediction={cur.prediction} unit={unit} /> :
-              <p className="text-sm text-graphite">This run has no prediction.</p>)}
+              <p className="deck-muted">This run has no prediction.</p>)}
             {!pending && result && <Reveal result={result} unit={unit} human={guesses[result.run_id]} />}
           </section>
 
-          <GuardCard guard={cur?.guard ?? null} last={cur?.timeline[cur.timeline.length - 1]} wallS={Math.max(0, cur?.wall_s ?? (cur ? cur.elapsed_s + 1 : 0))}
+          {guardActive ? <GuardCard guard={cur?.guard ?? null} last={cur?.timeline[cur.timeline.length - 1]} wallS={Math.max(0, cur?.wall_s ?? (cur ? cur.elapsed_s + 1 : 0))}
             restorationFailed={!!state.error && /restoration failed|Restoration incomplete/.test(state.error)}
-            phase={state.phase} busy={running} onKill={kill} killing={busyAction === "kill"} />
-        </div>
-      </div>
+            phase={state.phase} busy={running} onKill={kill} killing={busyAction === "kill"} /> : (
+            <section className="deck-panel deck-guard-idle" aria-label="Guard">
+              <ShieldCheck size={16} aria-hidden="true" />
+              <span><b>Guard</b> standing by · plain code, not the model</span>
+              <span className="deck-meta">trips at {th.error_rate * 100}% errors · p95 {th.p95_ms / 1000} s · {cur?.guard ? `${th.unhealthy} other services down` : "blast radius"} · {th.max_wall_s} s</span>
+            </section>
+          )}
 
-      {state.results.length > 0 && <div data-stage-hide><History results={state.results} unit={target.unit} /></div>}
+          <section aria-labelledby="chart-h" className="deck-panel deck-chart">
+            <header className="deck-panel-head">
+              <h2 id="chart-h"><Activity size={16} aria-hidden="true" />Errors and latency</h2>
+              <span className="deck-meta">guard lines dashed · shaded = fault active</span>
+            </header>
+            {!cur && <p className="deck-muted">Signals appear when you confirm a run.</p>}
+            <LiveChart timeline={cur?.timeline ?? []} faultS={cur?.fault_duration_s ?? 10} faultEnd={faultEnd} guard={cur?.guard ?? null} />
+          </section>
+
+          <section aria-labelledby="fleet-h" className="deck-panel deck-fleet">
+            <header className="deck-panel-head">
+              <h2 id="fleet-h">Last 100 {unit.plural}</h2>
+              <span className="deck-meta">checked by id in the database</span>
+            </header>
+            <FleetGrid fleet={cur?.fleet ?? []} unit={unit} />
+          </section>
+        </div>
+
+        {/* experiment library for the selected service */}
+        <section aria-labelledby="choose-h" className="deck-panel deck-library">
+          <header className="deck-panel-head">
+            <h2 id="choose-h"><FlaskConical size={16} aria-hidden="true" />{node ? `Break ${node.id}` : "Choose a service"}</h2>
+            {node && <label className="scenario-search"><Search size={15} aria-hidden="true" /><span className="sr-only">Filter failures for {selected}</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter…" /></label>}
+          </header>
+          {node && node.notes.length > 0 && <p className="deck-muted deck-notes">{node.notes.join(" · ")}</p>}
+          <div className="deck-options">
+            {node && !options.length && <p className="deck-muted">No matching failures for this service.</p>}
+            {options.map((exp) => (
+              <button
+                key={exp.id}
+                type="button"
+                disabled={running || busyAction !== null || !connected}
+                onClick={() => choose(exp)}
+                aria-pressed={pending?.experiment_id === exp.id}
+                className="deck-option"
+              >
+                <span className="deck-option-top"><b>{exp.title}</b><span className="deck-risk">risk {Math.round(exp.risk_hint * 100)}</span></span>
+                <span className="deck-option-desc">{exp.description}</span>
+              </button>
+            ))}
+          </div>
+          <div data-stage-hide><MapEditor target={target} disabled={running} onChange={onTargetChange} /></div>
+        </section>
+
+        {state.results.length > 0 && <div data-stage-hide className="deck-history"><History results={state.results} unit={target.unit} /></div>}
+      </div>
     </div>
   );
 }
 
 function History({ results, unit }: { results: ExperimentResult[]; unit: Target["unit"] }) {
   return (
-    <section aria-labelledby="hist-h" className="mt-8">
+    <section aria-labelledby="hist-h" className="deck-panel">
       <h2 id="hist-h" className="wd-wide text-base font-semibold">Runs so far</h2>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full border-collapse text-sm">

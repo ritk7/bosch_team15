@@ -8,9 +8,11 @@ import { Campaign } from "./views/Campaign";
 import { Findings } from "./views/Findings";
 import { Report } from "./views/Report";
 import { Live } from "./views/Live";
+import { Pipeline } from "./views/Pipeline";
 
 const TABS = [
   { id: "live", label: "Live" },
+  { id: "pipeline", label: "Pipeline" },
   { id: "campaign", label: "Campaign" },
   { id: "findings", label: "Findings" },
   { id: "report", label: "Report" },
@@ -179,6 +181,7 @@ export default function App() {
         )}
         {switching && <p role="status" className="text-graphite">Loading the selected target…</p>}
         {!switching && tab === "live" && state && target && <Live key={target.name} state={state} target={target} catalog={catalog} onChange={refresh} connected={!offline} onTargetChange={refresh} />}
+        {!switching && tab === "pipeline" && state && target && <Pipeline state={state} target={target} />}
         {!switching && tab === "findings" && state && target && <Findings state={state} target={target} onChange={refresh} />}
         {!switching && tab === "campaign" && state && target && <Campaign state={state} target={target} catalog={catalog} onChange={refresh} />}
         {tab === "report" && state && <Report version={`${state.results.length}-${state.analysis?.score.value ?? ""}-${target?.name}`} />}

@@ -65,7 +65,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
       </div>
       {error && <p role="alert" className="border-l-2 border-crit pl-3 text-crit">{error}</p>}
 
-      <section aria-labelledby="plan-h" className="border border-rule bg-surface p-4">
+      <section aria-labelledby="plan-h" className="deck-panel">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 id="plan-h" className="wd-wide text-base font-semibold">AI ranked plan</h2>
           <button type="button" disabled={running} onClick={() => act(() => api.plan())}
@@ -96,7 +96,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
       </section>
 
       {state.compare && (
-        <section aria-labelledby="cmp-h" className="border border-rule bg-surface p-4">
+        <section aria-labelledby="cmp-h" className="deck-panel">
           <h2 id="cmp-h" className="wd-wide text-base font-semibold">AI planner against random order</h2>
           <div className="mt-3 flex flex-wrap items-baseline gap-x-10 gap-y-2">
             <p><span className="wd-wide text-[2.25rem] leading-none font-semibold text-cobalt tabular-nums">{state.compare.planner_runs_to_top3 ?? "—"}</span>
@@ -108,7 +108,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
         </section>
       )}
 
-      <section aria-labelledby="tw-h" className="border border-rule bg-surface p-4">
+      <section aria-labelledby="tw-h" className="deck-panel">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="tw-h" className="wd-wide text-base font-semibold">Digital twin rehearsal</h2>
           <span className="text-sm text-graphite">
@@ -165,7 +165,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
           {c.picks.map((p) => {
             const r = result(p.experiment_id);
             return (
-              <li key={p.order} className="border border-rule bg-surface p-4">
+              <li key={p.order} className="deck-panel">
                 <div className="flex flex-wrap items-baseline gap-x-3">
                   <span className="wd-wide text-lg font-semibold text-graphite tabular-nums">{p.order}</span>
                   <span className="font-semibold">{byId.get(p.experiment_id)?.title ?? p.experiment_id}</span>

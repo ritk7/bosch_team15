@@ -78,7 +78,7 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
             </h2>
             {a.findings.length === 0 && <p className="text-graphite">No experiment caused measurable harm.</p>}
             {a.findings.map((f, i) => (
-              <article key={f.id} className="border border-rule bg-surface p-4">
+              <article key={f.id} className="deck-panel">
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                   <span className="wd-wide text-lg font-semibold text-graphite tabular-nums">{i + 1}</span>
                   <span className={`border px-1.5 py-0.5 text-xs font-semibold ${SEV[f.severity]}`}>{f.severity}</span>
@@ -93,10 +93,22 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
                 </ul>
               </article>
             ))}
+            {(() => {
+              // coverage is computed from the score's per-service ranking: what the score does not yet cover
+              const svc = a.score.services ?? [];
+              const untested = svc.filter((x) => x.value == null).map((x) => x.service);
+              if (!svc.length || !untested.length) return null;
+              return (
+                <aside className="coverage-note" aria-label="Coverage">
+                  <strong>{svc.length - untested.length} of {svc.length} services tested</strong>
+                  <span>The score only covers what was broken. Untested: {untested.join(", ")}. Run an experiment on {untested.length === 1 ? "it" : "them"} from the Live tab, or let the Campaign tab pick.</span>
+                </aside>
+              );
+            })()}
           </section>
 
           <div className="space-y-6">
-            <section aria-labelledby="s-h" className="border border-rule bg-surface p-4">
+            <section aria-labelledby="s-h" className="deck-panel">
               <h2 id="s-h" className="wd-wide text-base font-semibold">Resilience score</h2>
               <div className="mt-2 flex items-baseline gap-4">
                 <span className={`wd-wide text-[3.25rem] leading-none font-semibold tabular-nums ${a.score.value < 50 ? "text-crit" : a.score.value < 80 ? "text-warn" : "text-ok"}`}>
@@ -146,7 +158,7 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
             </section>
 
             {fx && (
-              <section aria-labelledby="x-h" className="border border-rule bg-surface p-4">
+              <section aria-labelledby="x-h" className="deck-panel">
                 <h2 id="x-h" className="wd-wide text-base font-semibold">Recommended fixes</h2>
                 <p className="mt-1 text-xs text-graphite">The engineer decides. Only compose changes can be applied here; the rest is advice.</p>
                 <div className="mt-3 space-y-3">
