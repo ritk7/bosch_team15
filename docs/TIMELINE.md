@@ -31,6 +31,11 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 | 15:08 | **Observability**: Prometheus and Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map. | commit `Observability` |
 | plan 17:00 | Milestone 1 submission; shortlisting on the idea. | |
 
+| 15:30–17:00 | Shortlisted after the Milestone 1 submission. Hard audit of the build against every Bosch slide | |
+| evening | Closed the audit gaps: AI ranked plan, per-service resilience ranking, network delay and packet loss (tc netem), real DB overload, traffic spike while a service is down, collateral-only blast radius, baseline-relative latency limit, fault window by risk with injection only into a steady app, manual map correction, health in the baseline, live findings, twin-guided planning, ledger across restarts, time-boxed AI calls, stage mode, `setup.sh`, architecture diagram | commits `Quick fixes`, `Features`, `Network delay and packet loss` |
+| evening | Verified on real Docker: latency, packet loss, DB overload, CPU throttle, traffic spike, spike while the worker is down. Found and fixed `docker update --cpus 0` silently keeping a CPU limit | commit `Fix: CPU limits` |
+| evening | Full real-Docker session for the sample findings report: twin, ranked plan, 5-pick AI campaign, AI analysis, fix approved, re-run: score 0 → 35 (`docs/sample-findings-report-voting.md`) | |
+
 ## Day 2: Sunday (plan)
 
 | Time | Plan |

@@ -29,7 +29,7 @@ def penalty(result: dict, fan_in: int) -> tuple[float, list[str]]:
     o = result["outcome"]
     parts: list[tuple[float, str]] = []
     if o["lost"] > 0:
-        parts.append((20 + 10 * min(1.0, o["lost"] / 50), f"{o['lost']} acknowledged units lost"))
+        parts.append((20 + 10 * min(1.0, o["lost"] / 50), f"{o['lost']} acknowledged unit{'' if o['lost'] == 1 else 's'} lost"))
     if o["recovery_s"] is None:
         parts.append((25.0, "never recovered within 30 s"))
     elif o["recovery_s"] > 10:

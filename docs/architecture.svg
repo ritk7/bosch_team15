@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900" font-family="Helvetica Neue, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#586472"/>
+    </marker>
+    <style>
+      .box { fill:#ffffff; stroke:#d6dbe2; stroke-width:2; }
+      .ai { fill:#e6eafb; stroke:#2747d0; stroke-width:2; }
+      .code { fill:#ffffff; stroke:#16202b; stroke-width:2; }
+      .safe { fill:#fbecea; stroke:#b3372a; stroke-width:2.5; }
+      .app { fill:#eaf4ee; stroke:#2a6f4e; stroke-width:2; }
+      .t { fill:#16202b; font-size:21px; font-weight:700; }
+      .s { fill:#586472; font-size:15px; }
+      .tag { font-size:13px; font-weight:700; letter-spacing:0.02em; }
+      .line { stroke:#586472; stroke-width:2; fill:none; marker-end:url(#a); }
+      .red { stroke:#b3372a; stroke-width:2.5; fill:none; marker-end:url(#a); stroke-dasharray:7 5; }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="#f1f3f6"/>
+  <text x="60" y="68" font-size="36" font-weight="800" fill="#16202b">Chaos Sentinel: architecture</text>
+  <text x="60" y="102" class="s" font-size="18">Predict → break safely → measure every unit → explain → fix → prove. AI suggests; plain code keeps it safe.</text>
+
+  <!-- legend -->
+  <g transform="translate(1040,46)">
+    <rect x="0" y="0" width="22" height="16" class="ai"/><text x="30" y="13" class="s">AI agent (Claude Haiku, rules fallback)</text>
+    <rect x="0" y="26" width="22" height="16" class="code"/><text x="30" y="39" class="s">deterministic code</text>
+    <rect x="300" y="0" width="22" height="16" class="safe"/><text x="330" y="13" class="s">safety</text>
+    <rect x="300" y="26" width="22" height="16" class="app"/><text x="330" y="39" class="s">app under test</text>
+  </g>
+
+  <!-- row 1 -->
+  <rect x="60" y="150" width="250" height="120" rx="10" class="code"/>
+  <text x="80" y="185" class="t">1 · Mapper</text>
+  <text x="80" y="212" class="s">compose file → services,</text>
+  <text x="80" y="232" class="s">dependencies, hidden data</text>
+  <text x="80" y="252" class="s">flows, SPOF, restart policy</text>
+
+  <rect x="360" y="150" width="250" height="120" rx="10" class="code"/>
+  <text x="380" y="185" class="t">2 · Digital twin</text>
+  <text x="380" y="212" class="s">rehearses every experiment</text>
+  <text x="380" y="232" class="s">in seconds; corrected by</text>
+  <text x="380" y="252" class="s">real Docker measurements</text>
+
+  <rect x="660" y="150" width="270" height="120" rx="10" class="ai"/>
+  <text x="680" y="185" class="t">3 · Planner agent</text>
+  <text x="680" y="212" class="s">ranks every experiment with a</text>
+  <text x="680" y="232" class="s">reason; predicts errors, lost</text>
+  <text x="680" y="252" class="s">units, recovery; picks window</text>
+
+  <rect x="980" y="150" width="270" height="120" rx="10" class="code"/>
+  <text x="1000" y="185" class="t">4 · Injector</text>
+  <text x="1000" y="212" class="s">crash (SIGKILL) · hang · cut ·</text>
+  <text x="1000" y="232" class="s">delay/loss · CPU · DB overload ·</text>
+  <text x="1000" y="252" class="s">traffic spike · combined</text>
+
+  <rect x="1300" y="150" width="240" height="120" rx="10" class="app"/>
+  <text x="1320" y="185" class="t">Target app</text>
+  <text x="1320" y="212" class="s">Docker Compose, local only</text>
+  <text x="1320" y="236" class="s">· voting app (5 services)</text>
+  <text x="1320" y="256" class="s">· Bosch hawkBit (OTA server)</text>
+
+  <path d="M310,210 L355,210" class="line"/>
+  <path d="M610,210 L655,210" class="line"/>
+  <path d="M930,210 L975,210" class="line"/>
+  <path d="M1250,210 L1295,210" class="line"/>
+
+  <!-- guard -->
+  <rect x="980" y="330" width="560" height="150" rx="10" class="safe"/>
+  <text x="1000" y="366" class="t">5 · Guard: the kill switch (plain code, every 0.5 s)</text>
+  <text x="1000" y="394" class="s">stops the fault when: error rate ≥ 60% · p95 ≥ max(3 s, 10× baseline) ·</text>
+  <text x="1000" y="414" class="s">collateral services down (blast radius) · experiment &gt; 45 s</text>
+  <text x="1000" y="440" class="s">restore in finally · undo on restart · final check repairs late failures ·</text>
+  <text x="1000" y="460" class="s">scoped to the project's containers · allow-listed services</text>
+  <path d="M1420,270 L1420,325" class="red"/>
+  <path d="M1110,330 L1110,275" class="red"/>
+
+  <!-- probe -->
+  <rect x="60" y="330" width="500" height="150" rx="10" class="code"/>
+  <text x="80" y="366" class="t">6 · Probe: business-level truth</text>
+  <text x="80" y="394" class="s">5 units/s, each with a unique id, looked up in the database:</text>
+  <text x="80" y="418" class="s">stored · waiting · error · lost silently ("200 OK" but gone)</text>
+  <text x="80" y="442" class="s">→ errors, p95, recovery time, timeline, 100-unit grid,</text>
+  <text x="80" y="462" class="s">→ /metrics for Prometheus + Grafana</text>
+  <path d="M1300,250 C1200,300 700,300 560,360" class="line"/>
+
+  <!-- analysis -->
+  <rect x="60" y="540" width="290" height="150" rx="10" class="ai"/>
+  <text x="80" y="576" class="t">7 · Risk agent</text>
+  <text x="80" y="604" class="s">ranked findings by severity;</text>
+  <text x="80" y="624" class="s">evidence copied from measured</text>
+  <text x="80" y="644" class="s">outcomes; invented numbers</text>
+  <text x="80" y="664" class="s">are rejected</text>
+
+  <rect x="390" y="540" width="290" height="150" rx="10" class="code"/>
+  <text x="410" y="576" class="t">8 · Resilience score</text>
+  <text x="410" y="604" class="s">deterministic formula, 0–100;</text>
+  <text x="410" y="624" class="s">per-service ranking, weakest</text>
+  <text x="410" y="644" class="s">first; harmless runs never</text>
+  <text x="410" y="664" class="s">raise it</text>
+
+  <rect x="720" y="540" width="290" height="150" rx="10" class="ai"/>
+  <text x="740" y="576" class="t">9 · Fix agent</text>
+  <text x="740" y="604" class="s">concrete fixes with compose</text>
+  <text x="740" y="624" class="s">snippets; only restart policies</text>
+  <text x="740" y="644" class="s">can be applied, and only after</text>
+  <text x="740" y="664" class="s">an engineer approves</text>
+
+  <rect x="1050" y="540" width="490" height="150" rx="10" class="code"/>
+  <text x="1070" y="576" class="t">10 · Apply and re-run: the proof</text>
+  <text x="1070" y="604" class="s">override file → same experiments re-run →</text>
+  <text x="1070" y="624" class="s">score before / after (real Docker: 57 → 74)</text>
+  <text x="1070" y="652" class="s">report · architecture page · cost ledger ·</text>
+  <text x="1070" y="672" class="s">CI gate: gate --min-score 80</text>
+
+  <path d="M310,480 L240,535" class="line"/>
+  <path d="M350,615 L385,615" class="line"/>
+  <path d="M680,615 L715,615" class="line"/>
+  <path d="M1010,615 L1045,615" class="line"/>
+  <path d="M1060,540 C950,520 940,330 985,275" class="line"/><text x="890" y="470" class="s">re-run</text>
+
+  <!-- footer -->
+  <rect x="60" y="740" width="1480" height="110" rx="10" class="box"/>
+  <text x="80" y="776" class="t">Cost and trust</text>
+  <text x="80" y="804" class="s">AI agents: Planner (rank, pick, predict), Risk, Fix on the smallest model, time-boxed, each with a rules fallback (works with no AI key). Response cache;</text>
+  <text x="80" y="826" class="s">every decision in the cost ledger. Prompts carry compact JSON of the graph and measured numbers, never logs. Runs on a laptop; nothing leaves the machine but prompts.</text>
+</svg>

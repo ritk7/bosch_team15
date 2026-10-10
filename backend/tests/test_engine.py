@@ -225,3 +225,12 @@ def test_latency_and_packet_loss_are_injected_and_removed():
     r1, r2, original, mid, after = run(go())
     assert r1["outcome"]["peak_p95_ms"] > 2000  # +500 ms per round trip on the vote -> redis path
     assert mid == original and after == original and original["redis"]["net"] is None
+
+
+def test_planner_number_check_allows_rounding_but_not_invention():
+    from app.planner import numbers_ok
+
+    src = '{"risk":0.85,"lost":22,"recovery_s":7.8}'
+    assert numbers_ok("risk 0.85, 22 votes lost, about 8 s", src)
+    assert numbers_ok("85% risk", src)
+    assert not numbers_ok("90% error rate", src)

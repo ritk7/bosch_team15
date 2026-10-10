@@ -13,6 +13,19 @@ import re
 from . import ledger, llm, score
 
 
+NUM = r"\d+(?:\.\d+)?"
+
+
+def numbers_ok(said: str, source: str) -> bool:
+    """Every number the model writes must come from its input (rounding allowed): no invented figures."""
+    allowed = [float(x) for x in re.findall(NUM, source)]
+    for x in re.findall(NUM, said):
+        v = float(x)
+        if not any(abs(v - a) <= max(0.5, 0.05 * abs(a)) or abs(v - a * 100) <= 0.5 for a in allowed):
+            return False
+    return True
+
+
 def _adapt(exp: dict, results: list[dict], graph: dict, twin: dict[str, float] | None = None) -> tuple[float, str]:
     """Priority = graph risk, adjusted by observed behaviour and, when available, the twin's rehearsal.
     Returns (priority, reason)."""
@@ -80,21 +93,23 @@ async def rank_all(catalog: list[dict], results: list[dict], graph: dict, twin: 
     system = ("You plan chaos experiments. Rank ALL experiments from most to least informative or risky, using the "
               "dependency graph, the twin's predicted penalty and what was measured. One short reason each. "
               'Reply JSON only: {"plan":[{"experiment_id":"...","reason":"..."}]}')
-    ids = [e["id"] for e in catalog]
-    allowed = set(re.findall(r"\d+(?:\.\d+)?", prompt))
+    ids = {e["id"] for e in catalog}
 
     def accept(text: str) -> bool:
-        rows = (llm.extract_json(text) or {}).get("plan")
-        if not isinstance(rows, list) or sorted(r.get("experiment_id") for r in rows if isinstance(r, dict)) != sorted(ids):
+        rows = [r for r in (llm.extract_json(text) or {}).get("plan") or [] if isinstance(r, dict)]
+        got = [r.get("experiment_id") for r in rows]
+        if len(set(got)) != len(got) or not set(got) <= ids or len(got) < 0.7 * len(ids):
             return False
-        said = " ".join(str(r.get("reason", "")) for r in rows)
-        return all(str(r.get("reason", "")).strip() for r in rows) and set(re.findall(r"\d+(?:\.\d+)?", said)) <= allowed
+        return all(str(r.get("reason", "")).strip() for r in rows) and \
+            numbers_ok(" ".join(str(r.get("reason", "")) for r in rows), prompt)
 
     prio = {row["experiment_id"]: row["priority"] for row in base}
     try:
         res = await asyncio.wait_for(llm.complete("rank", prompt, system=system, max_tokens=1400, min_tier="small",
                                                   accept=accept), 40)
-        rows = (llm.extract_json(res.text) or {})["plan"]
+        rows = [r for r in (llm.extract_json(res.text) or {})["plan"] if isinstance(r, dict)]
+        seen = {r["experiment_id"] for r in rows}
+        rows += [{"experiment_id": b["experiment_id"], "reason": b["reason"]} for b in base if b["experiment_id"] not in seen]
         plan = [{"experiment_id": r["experiment_id"], "rank": i + 1, "priority": prio[r["experiment_id"]],
                  "reason": str(r["reason"]).strip()} for i, r in enumerate(rows)]
         return {"plan": plan, "decided_by": res.source, "model": res.model}
@@ -113,17 +128,23 @@ async def pick(remaining: list[dict], results: list[dict], graph: dict, twin: di
                       "recovery_s": r["outcome"]["recovery_s"], "guard": r["outcome"]["guard_tripped"]} for r in results[-8:]],
     }, separators=(",", ":"))
     system = ("You plan chaos experiments. Pick the next experiment that is most likely to reveal a new, serious "
-              "weakness, using the dependency graph and what was measured. Reply JSON only: "
+              "weakness, using the dependency graph and what was measured. Prefer services not tested yet. Reply JSON only: "
               '{"experiment_id":"...","reason":"one sentence","hypothesis":"one sentence"}')
 
-    allowed = set(re.findall(r"\d+(?:\.\d+)?", prompt))
+    # coverage guardrail: a service already tested twice is off limits while other services are still untested
+    tested: dict[str, int] = {}
+    for r in results:
+        tested[r["experiment"]["target"]] = tested.get(r["experiment"]["target"], 0) + 1
+    untested = {e["target"] for e in remaining} - set(tested)
+    saturated = {t for t, n in tested.items() if n >= 2} if untested else set()
+    by_id = {e["id"]: e for e in remaining}
 
     def accept(text: str) -> bool:
         d = llm.extract_json(text) or {}
         said = str(d.get("reason", "")) + " " + str(d.get("hypothesis", ""))
-        # no invented numbers: everything it quotes must be in the graph or the measurements it was given
-        return d.get("experiment_id") in ids and bool(str(d.get("reason", "")).strip()) and \
-            set(re.findall(r"\d+(?:\.\d+)?", said)) <= allowed
+        eid = d.get("experiment_id")
+        return eid in ids and by_id[eid]["target"] not in saturated and bool(str(d.get("reason", "")).strip()) \
+            and numbers_ok(said, prompt)
 
     try:
         res = await asyncio.wait_for(llm.complete("plan", prompt, system=system, max_tokens=200, min_tier="small",

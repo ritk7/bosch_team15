@@ -73,7 +73,7 @@ Seven properties, each one a scoring story:
 | Runners | `runner.py`, `docker_runner.py` | one interface: real Docker CLI or the simulation (`RUNNER=docker/sim/auto`) |
 | Targets | `targets/voting.py`, `targets/hawkbit.py` | per-app workload, business check, twin, extra experiments |
 | Probe | `probe.py` | sends units, classifies each: stored / waiting / error / **lost silently** / pending |
-| Injectors | `injectors.py` | crash (true SIGKILL), hang, network cut, CPU throttle, traffic spike, compound |
+| Injectors | `injectors.py` | crash (true SIGKILL), hang, network cut, network delay and packet loss (tc netem), CPU throttle, DB overload (query flood + CPU limit), traffic spike, combined failures |
 | Guard | `guard.py` | the kill switch; thresholds below |
 | Engine | `campaign.py` | phases, safety files, campaign, twin, re-run, demo reset |
 | AI agents | `agents.py`, `planner.py`, `analysis.py` | planner, predictor, risk, fix |
@@ -87,7 +87,7 @@ Each agent is one call to a small model with a strict JSON check, plus a rules f
 
 | Agent | Decides | Guardrail |
 |---|---|---|
-| Planner | which experiment next, and why | may only pick from the allow-listed catalog; may not quote numbers we didn't measure |
+| Planner | ranks every experiment with a reason; picks the next one; chooses the fault window by risk | may only pick from the allow-listed catalog; may not quote numbers we didn't measure; 15 s time limit, then rules |
 | Predictor | expected errors %, units lost, recovery s | numbers must be in range; shown next to the measured result |
 | Risk | rewords findings so engineers understand them | ids fixed; any number must already be in the measured evidence |
 | Fix | concrete steps for each fix | only compose restart policies can be applied, and only after approval |
@@ -96,8 +96,14 @@ Models: Claude Haiku 4.5 through our OpenAI-compatible router (small tier); Llam
 local tier; deterministic rules when no model answers. Cached answers must pass today's check too.
 
 ### Safety controls
-- Guard limits: error rate over 3 s ≥ 60%, p95 latency ≥ 3 s, ≥ 3 services down (blast radius), or experiment > 45 s.
+- Guard limits: error rate over 3 s ≥ 60%; p95 latency ≥ max(3 s, 10× the measured baseline); collateral services down
+  (services not faulted on purpose: 2 for the voting app, 1 for 3-service hawkBit); or experiment > 45 s.
+- When and how safely: a fault is injected only into a steady app (no errors, low latency for 2 s), and riskier
+  experiments get shorter fault windows (6, 8 or 10 s).
 - Scope: every command is `docker compose -p <project>`; service names are allow-listed from the compose file.
+  Two short-lived helpers act on one container of our own project at a time: `alpine --pid=host` sends SIGKILL to that
+  container's process; `netshoot` joins only that container's network namespace for netem. Full disk is deliberately
+  not injected (Docker Desktop's VM disk is shared by every container on the machine).
 - Restore in `finally`. The active fault is saved to disk and undone on the next start. A pre-flight repairs a broken app
   before a new fault. A post-run watch catches services that die later (secondary failures).
 - Fixes need an engineer's approval and go in a separate file that can be deleted to undo.
@@ -132,7 +138,9 @@ These are our best "engineering maturity" stories: we trusted measurements over 
    safety check that repairs and reports it.
 6. **The first fix wasn't enough.** `restart` on Redis alone: Redis healed, but its fast restart killed the worker (score
    fell 84 → 40). The fix agent now covers dependent workers too. Then: **57 → 74**, no guard needed.
-7. **The AI quoted a wrong number** ("90% error rate", measured 0.9%). Planner answers are now rejected if they invent
+7. **`docker update --cpus 0` silently keeps the limit.** The database stayed at 0.1 CPU after a throttle experiment.
+   We now lift the limit to all of Docker's CPUs, and a test pins the exact command.
+8. **The AI quoted a wrong number** ("90% error rate", measured 0.9%). Planner answers are now rejected if they invent
    numbers, cached answers included.
 
 ## 8. Results (all measured)
@@ -180,6 +188,13 @@ These are our best "engineering maturity" stories: we trusted measurements over 
 Real hawkBit on a 24 GB M4 Pro (`python dev.py selftest --target hawkbit`), clean run from a fresh clone, 3-minute video,
 team form, three rehearsals, submit 30 minutes early.
 
+## 9b. Added on day 1 evening (after the shortlist)
+AI ranked plan for every experiment; per-service resilience ranking; network delay and packet loss; real DB overload;
+traffic spike while a service is down; blast radius counting collateral services only; guard latency relative to the
+baseline; fault window by risk and injection only into a steady app; manual map correction; health in the baseline;
+live findings after every run; twin-guided planning; cost ledger kept across restarts; AI calls time-boxed (predictions
+now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture diagram (`docs/architecture.png`).
+
 ## 10. Bosch checklist coverage
 | Bosch asks | Status |
 |---|---|
@@ -188,14 +203,13 @@ team form, three rehearsals, submit 30 minutes early.
 | Inject with safety limits (error rate, latency, blast radius) | ✅ all three + wall time |
 | Observe errors, slowdowns, recovery | ✅ + silent data loss + Grafana |
 | Weaknesses, fixes, ranked resilience score | ✅ |
-| Failure types | ✅ crash, overloaded DB, failed dependency, traffic spike; ⚠️ network cut (no latency/loss); ❌ full disk |
+| Failure types | ✅ crash, slow/lossy network (delay, loss, cut), overloaded DB, failed dependency, traffic spike, all verified on real Docker; ❌ full disk (deliberate, safety) |
 | Stretch: re-run after a fix / live dashboard / combined failures | ✅ ✅ ✅ |
 | Deliverables | ✅ source + README, architecture overview, findings report · ⏳ video, team form |
 
 ## 11. Honest limits (say them before judges ask)
 - Real hawkBit is built from its source and docs and tested on its twin; real-server verification runs on the 24 GB laptop.
-- Not built: network latency and packet-loss injection (needs a privileged netem helper on Docker Desktop), disk-full, Kubernetes.
-- CPU throttle and traffic spike are tested on the twin; crash, hang and compound failures are verified on real Docker.
+- Not built: disk-full (deliberate: shared VM disk), Kubernetes.
 - On hawkBit the AI planner doesn't beat random yet.
 - cAdvisor can't see containers on our Docker Desktop version, so Grafana shows our own measurements instead.
 

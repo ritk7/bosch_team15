@@ -359,7 +359,10 @@ class Engine:
         sc = score.compute(self.results, self.graph)
         self.analysis = {"findings": found, "score": sc, "decided_by": source, "model": model}
         label = "after fix" if self.applied_fixes else "before fix"
-        self.score_history.append({"label": label, "value": sc["value"], "ts": time.time()})
+        if self.score_history and self.score_history[-1]["label"] == label:
+            self.score_history[-1] = {"label": label, "value": sc["value"], "ts": time.time()}  # same stage: latest wins
+        else:
+            self.score_history.append({"label": label, "value": sc["value"], "ts": time.time()})
         self.save()
         return self.analysis
 
