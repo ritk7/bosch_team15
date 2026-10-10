@@ -4,6 +4,7 @@
 services:
   hawkbit:
     image: "hawkbit/hawkbit-update-server:latest"
+    platform: linux/amd64  # amd64-only image; runs under emulation on Apple Silicon
     environment:
       - 'PROFILES=mysql'
       - 'SPRING_DATASOURCE_URL=jdbc:mariadb://mysql:3306/hawkbit'
@@ -26,8 +27,7 @@ services:
       MYSQL_DATABASE: "hawkbit"
       MYSQL_ALLOW_EMPTY_PASSWORD: "true"
     restart: always
-    ports:
-      - "3306:3306"
+    # no host port: only hawkBit talks to MySQL (avoids clashing with a local MySQL on 3306)
     healthcheck:
       test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
       timeout: 20s
@@ -40,9 +40,7 @@ services:
       RABBITMQ_DEFAULT_VHOST: "/"
       RABBITMQ_DEFAULT_USER: "guest"
       RABBITMQ_DEFAULT_PASS: "guest"
-    ports:
-      - "15672:15672"
-      - "5672:5672"
+    # no host ports: only hawkBit talks to RabbitMQ
     deploy:
       restart_policy:
         condition: on-failure
