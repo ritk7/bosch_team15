@@ -236,6 +236,11 @@ class DockerRunner:
                 return
         await self._compose("kill", "-s", "SIGKILL", svc)
 
+    async def restart(self, svc: str) -> None:
+        """Repair a wedged application process (container running, app not answering)."""
+        self._check(svc)
+        await self._compose("restart", "-t", "10", svc, timeout=120)
+
     async def start(self, svc: str) -> None:
         self._check(svc)
         await self._compose("start", svc)

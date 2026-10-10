@@ -207,6 +207,17 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 | Stretch: re-run after a fix / live dashboard / combined failures | ✅ ✅ ✅ |
 | Deliverables | ✅ source + README, architecture overview, findings report · ⏳ video, team form |
 
+## 10b. Real Bosch hawkBit findings (measured on Tejas's M4 Pro)
+- Our client drives hawkBit's real management API and device API: 718 devices created, the checked ones `in_sync`.
+- Crash mysql: 71/71 devices updated, recovered in 24 s. Combined (cut rabbitmq, crash mysql): 99/99, 14 s.
+- +500 ms latency on mysql: 96% of updates failed and **hawkBit's API never recovered by itself**; containers kept
+  running. The same happened after one of two MySQL crashes. A restart of hawkBit fixed it.
+- So: hawkBit does not reliably re-establish its database connections after a disruption. That's our headline Bosch
+  finding. The fix to recommend: connection validation and pool eviction (e.g. Hikari keepalive / validation timeout),
+  plus a health check that exercises the database, so Docker can restart it automatically.
+- Tool changes driven by this run: application-level readiness (not just running containers), automatic repair and
+  reporting of a wedged service, a rate-aware steady gate, hawkBit default 2 devices/s, fresh warm baselines.
+
 ## 11. Honest limits (say them before judges ask)
 - Real hawkBit is built from its source and docs and tested on its twin; real-server verification runs on the 24 GB laptop.
 - Not built: disk-full (deliberate: shared VM disk), Kubernetes.

@@ -122,6 +122,19 @@ class VotingTarget:
     async def prepare(self, runner) -> None:
         return None
 
+    async def app_ready(self, runner) -> tuple[bool, str]:
+        """Application-level readiness: the vote page answers (containers running is not enough)."""
+        if runner.kind != "docker":
+            return (runner.app.is_up("vote") and runner.app.is_up("redis")), "simulated vote and redis answer"
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as http:
+                r = await http.get("http://localhost:8080/")
+            return r.status_code == 200, f"vote page HTTP {r.status_code}"
+        except httpx.HTTPError as err:
+            return False, f"vote page not answering ({type(err).__name__})"
+
     def assumptions(self, rate: float) -> list[str]:
         return [
             f"The probe posts {rate:g} votes per second, each with a unique voter_id (cs-<run>-<n>), and checks ids in Postgres.",

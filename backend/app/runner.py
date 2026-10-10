@@ -105,6 +105,11 @@ class SimRunner:
         self._check(svc)
         self.app.set_cpus(svc, cpus)
 
+    async def restart(self, svc: str) -> None:
+        self._check(svc)
+        self.app.stop(svc)
+        self.app.start(svc)
+
     async def set_net(self, svc: str, spec: str | None) -> None:
         """Simulated tc netem: 'delay 500ms' and/or 'loss 25%' on everything this service sends."""
         self._check(svc)

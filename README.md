@@ -108,6 +108,10 @@ Findings, Report, Cost views. Docs: [architecture](docs/CONTRACT.md), [timeline]
   packet loss, DB overload, CPU throttle, traffic spike, spike while the worker is down; guard trips and restores;
   fix and re-run 57 → 74; restore after the tool itself restarts mid-fault. Real runs found and fixed our own bugs
   (reused voter cookie, `docker update --cpus 0` silently keeping a CPU limit).
-- hawkBit: built from hawkBit's source and docs and tested on its twin; real-server verification is
-  `python dev.py selftest --target hawkbit` on a 16 GB+ machine.
+- **Real Bosch hawkBit** (Tejas's M4 Pro, 10–11 Oct): our client drives hawkBit's real management and device APIs
+  (718 devices created, all checked ones `in_sync`); crash, +500 ms latency and the combined failure were injected
+  into the real stack and every container was restored. **Finding:** after a MySQL disruption, hawkBit's API stayed
+  unresponsive (containers running) in 2 of 4 runs until hawkBit was restarted, consistent with database connections
+  that are not re-established. Chaos Sentinel now checks the application itself, not just containers, and restarts
+  and reports a wedged service as a secondary failure.
 - Not built: disk-full (safety, see above), Kubernetes.

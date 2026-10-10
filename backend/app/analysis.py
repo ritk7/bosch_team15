@@ -46,7 +46,7 @@ def rules_findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
             impact = "Users notice errors or delays while the fault lasts."
         evidence = [
             f"{exp['id']}: {o['sent']} sent, {o['acked']} acknowledged, {o['stored']} {unit['stored']}, {o['lost']} {unit['lost']}",
-            f"errors {o['error_pct']}%, peak p95 {round(o['peak_p95_ms'])} ms, recovery "
+            f"errors {o['error_pct']}%, p95 over the run {round(o['p95_ms'])} ms, peak 3 s p95 {round(o['peak_p95_ms'])} ms, recovery "
             f"{'not observed (bounded recovery window)' if o['recovery_s'] is None else str(o['recovery_s']) + ' s'}",
         ]
         if o["guard_tripped"]:

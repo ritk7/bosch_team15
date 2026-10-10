@@ -84,7 +84,7 @@ export function Reveal({ result, unit, human }: { result: ExperimentResult; unit
       })()}
       <p className="mt-3 text-[0.8rem] text-graphite">
         {o.sent} {o.sent === 1 ? unit.singular : unit.plural} sent, {o.acked} acknowledged, {o.stored} {unit.stored}
-        {o.lost ? `, ${o.lost} ${unit.lost}` : ""}. Peak p95 {Math.round(o.peak_p95_ms)} ms.{" "}
+        {o.lost ? `, ${o.lost} ${unit.lost}` : ""}. p95 over the run {Math.round(o.p95_ms)} ms; peak p95 in any 3 s window {Math.round(o.peak_p95_ms)} ms.{" "}
         {o.guard_tripped ? `The guard stopped the fault: ${o.guard_reason?.toLowerCase()}.` : "The guard did not need to step in."}
       </p>
       {(result.notes ?? []).map((n) => (

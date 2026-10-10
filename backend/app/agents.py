@@ -59,8 +59,12 @@ def rules_prediction(exp: dict, graph: dict, *, entry: str, sync: set[str], rate
         err = min(100.0, 100 * outage / window)
         lost = round(rate * 0.2) if node["stateful"] and any("memory only" in s for s in node["notes"]) else 0
         why = (f"{entry} calls {target} on every request" if target != entry else f"{target} is the entry point")
-        why += "; it restarts by itself" if self_heal else \
-            ", it has no restart policy, so it stays down until the guard restores it"
+        if self_heal:
+            why += "; it restarts by itself"
+        elif node["restart"]:
+            why += f"; its restart policy ({node['restart']}) does not help against a {exp['type'].replace('_', ' ')}"
+        else:
+            why += ", it has no restart policy, so it stays down until the guard restores it"
         hyp = f"{entry} fails fast while {target} is down" + \
               (f"; {unit_plural} waiting in {target}'s memory are lost" if lost else "")
         return {"expected_error_pct": round(err), "expected_votes_lost": lost, "expected_recovery_s": round(outage, 1),

@@ -75,14 +75,19 @@ async def main() -> int:
         return 1
     o = result["outcome"]
     ok &= line(saw_down or o["errors"] > 0 or o["guard_tripped"], "fault injected",
-               f"{victim} killed, {o['errors']} errors ({o['error_pct']}%), peak p95 {o['peak_p95_ms']} ms")
+               f"{victim} killed, {o['errors']} errors ({o['error_pct']}%), p95 over the run {o.get('p95_ms', '?')} ms, peak 3 s p95 {o['peak_p95_ms']} ms")
     after = await runner.snapshot()
     all_back = all(v["state"] == "running" for v in after.values())
     ok &= line(all_back and state.load_active_fault() is None, "guard restored",
                f"guard {'tripped: ' + (o['guard_reason'] or '') if o['guard_tripped'] else 'not tripped'}; "
                f"all services running: {all_back}")
-    ok &= line(o["recovery_s"] is not None, "recovery measured",
-               f"recovery {o['recovery_s']} s, {o['lost']} {target.unit['singular'] if o['lost'] == 1 else u} {target.unit['lost']}, {o['stored']}/{o['acked']} acknowledged {u} {target.unit['stored']}")
+    app_ok, app_why = (await target.app_ready(runner)) if hasattr(target, "app_ready") else (True, "not checked")
+    rec = f"{o['recovery_s']} s" if o["recovery_s"] is not None else "never within 30 s: the app did not recover by itself (a finding)"
+    ok &= line(app_ok, "recovery measured",
+               f"recovery {rec}; {o['lost']} {target.unit['singular'] if o['lost'] == 1 else u} {target.unit['lost']}, "
+               f"{o['stored']}/{o['acked']} acknowledged {u} {target.unit['stored']}; application answering at the end: {app_why}")
+    for n in result.get("notes", []):
+        print(f"        note: {n}")
     print(f"\n{'PASS' if ok else 'FAIL'}: selftest {'passed' if ok else 'failed'}")
     return 0 if ok else 1
 

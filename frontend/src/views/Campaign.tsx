@@ -23,7 +23,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
   }
 
   const services = target.graph.nodes.map((n) => n.id);
-  const types = ["crash", "hang", "network_cut", "cpu_throttle", "traffic_spike", "compound"];
+  const types = ["crash", "hang", "network_cut", "latency", "packet_loss", "cpu_throttle", "db_overload", "traffic_spike", "compound"];
   const rows = state.twin?.rows ?? [];
   const cell = (svc: string, type: string) => rows.find((r) => r.target === svc && r.type === type);
   const maxPen = Math.max(1, ...rows.map((r) => r.penalty));

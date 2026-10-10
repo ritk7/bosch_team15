@@ -43,6 +43,7 @@ class SimHawkbit:
         self.inflight = 0
         self.svcs = {n: Svc(n, self.policies.get(n)) for n in self.warmup}
         self.synced: set[str] = set()
+        self.wedged = False  # measured: after MySQL latency (and 1 of 2 crashes) the API stayed dead until restarted
         self.rng = random.Random(self.seed)
         self._t = self.clock.now()
 
@@ -72,6 +73,11 @@ class SimHawkbit:
         h = self.reach("hawkbit", t)
         if h == "down":
             return "done", None, 0.002
+        ms_ = self.svcs["mysql"]
+        if ms_.delay_s() >= 0.3 or ms_.state == "paused":
+            self.wedged = True  # broken JDBC connections are kept in the pool
+        if self.wedged and h == "up":
+            return "wait", None, 0.0  # requests hang on dead pooled connections, then time out
         if h == "paused":
             return "wait", None, 0.0
         m = self.reach("mysql", t)
@@ -121,6 +127,8 @@ class SimHawkbit:
         s = self.svcs[name]
         if s.state in ("stopped", "restarting"):
             s.state, s.started_at, s.restart_at = "running", self._t, None
+            if name == "hawkbit":
+                self.wedged = False  # a restart gives it a fresh connection pool
 
     def pause(self, name: str) -> None:
         self.advance()
@@ -331,6 +339,20 @@ class HawkbitTarget:
 
     def docker_client(self, runner) -> HawkbitClient:
         return HawkbitClient()
+
+    async def app_ready(self, runner) -> tuple[bool, str]:
+        """Application-level readiness: the management API answers. Measured on real hawkBit: after a MySQL
+        disruption all three containers were running while /rest/v1/targets kept timing out."""
+        if runner.kind != "docker":
+            app = runner.app
+            ok = app.is_up("hawkbit") and app.is_up("mysql") and not app.wedged
+            return ok, "simulated hawkBit API answers" if ok else "simulated hawkBit API stuck"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as http:
+                r = await http.get("http://localhost:8080/rest/v1/targets", params={"limit": 1}, auth=MGMT_AUTH)
+            return r.status_code == 200, f"management API HTTP {r.status_code}"
+        except httpx.HTTPError as err:
+            return False, f"management API not answering ({type(err).__name__})"
 
     async def prepare(self, runner) -> None:
         if runner.kind == "docker":

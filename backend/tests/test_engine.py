@@ -326,3 +326,40 @@ def test_twin_reports_failed_rehearsals_and_skips_biased_comparison(monkeypatch)
     tw, e = run(go())
     assert tw["failed"] and tw["completed"] + len(tw["failed"]) == tw["attempted"]
     assert e.compare["planner_runs_to_top3"] is None and "Not computed" in e.compare["note"]
+
+
+def test_wedged_application_is_repaired_and_reported():
+    """Measured on real hawkBit: after MySQL latency the containers ran but the API stayed dead until restarted."""
+    async def go():
+        e = make_engine("hawkbit")
+        r = await e.run("twedge", e.experiment("latency-mysql"), "before", 6.0)
+        ok, why = await e.target.app_ready(e.runner)
+        return r, ok, e
+
+    r, ok, e = run(go())
+    assert r is not None, e.error
+    assert any("stayed unresponsive" in n for n in r["notes"])  # reported as a secondary failure
+    assert ok  # and the tool left the application answering
+    assert e.baseline is None  # a fresh baseline is measured before the next experiment
+
+
+def test_preflight_refuses_when_the_application_does_not_answer():
+    async def go():
+        e = make_engine("hawkbit")
+        e.runner.app.wedged = True
+        e._app_ready_within = lambda max_s: asyncio.sleep(0, result=False)
+        return await e.run("tnoapp", e.experiment("crash-mysql"), "before", 4.0), e
+
+    r, e = run(go())
+    assert r is None and "not answering" in (e.error or "") and "inject" not in e.current.get("phases", [])
+
+
+def test_explanation_matches_parsed_restart_policy():
+    from app import agents
+
+    t = targets.load("hawkbit")
+    g = t.graph()
+    exp = next(x for x in Engine(t, SimRunner(t, Clock(SPEED))).catalog if x["id"] == "compound-rabbitmq-down-mysql-crash")
+    p = agents.rules_prediction(exp, g, entry=t.entry, sync={"hawkbit", "mysql", "rabbitmq"}, rate=2, fault_s=6,
+                                history=[], unit_plural="devices")
+    assert "no restart policy" not in p["reason"] and "always" in p["reason"]

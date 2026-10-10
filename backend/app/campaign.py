@@ -177,7 +177,7 @@ class Engine:
         state.save_snapshot(await self.state_json())
 
     # ---- baseline ------------------------------------------------------------------------------------------
-    async def measure_baseline(self, duration_s: float = 5.0) -> dict:
+    async def measure_baseline(self, duration_s: float = 5.0, _warm_retry: bool = True) -> dict:
         if not math.isfinite(duration_s) or not 1 <= duration_s <= 60:
             raise ValueError("Baseline duration must be between 1 and 60 seconds")
         await self.target.prepare(self.runner)
@@ -196,11 +196,15 @@ class Engine:
         c = probe.counters()
         svcs = await self.runner.services()
         healthy = sum(s["state"] == "running" and s["health"] != "unhealthy" for s in svcs)
-        self.baseline = {"rps": round(len(done) / duration_s, 2), "healthy_services": healthy,
+        self.baseline = {"rps": round(len(done) / duration_s, 2), "healthy_services": healthy, "measured_at": time.time(),
                          "total_services": len(svcs),
                          "error_pct": round(100 * c["errors"] / max(1, c["sent"]), 1),
                          "p95_ms": round(p95([u.latency_ms or 0 for u in done]), 1),
                          "votes_sent": c["sent"], "votes_stored": c["stored"]}
+        if _warm_retry and self.baseline["p95_ms"] > 1000:
+            # measured: a cold hawkBit gave p95 2288 ms vs 163 ms warm, which would loosen the latency guard
+            await self.clock.sleep(10.0)
+            return await self.measure_baseline(duration_s, _warm_retry=False)
         return self.baseline
 
     # ---- run -----------------------------------------------------------------------------------------------
@@ -247,10 +251,23 @@ class Engine:
                     self.baseline = None
                     self.error = f"Pre-flight restored {', '.join(changed)}, which differed from the healthy app"
             await self.runner.wait_ready(self.order)
-            if self.baseline is None:
+            if not await self._app_ready_within(60.0):  # running containers are not enough: the app must answer
+                ok, why = await self.target.app_ready(self.runner)
+                raise RuntimeError(f"The application is not answering ({why}); nothing was injected")
+            if self.baseline and time.time() - self.baseline.get("measured_at", time.time()) > 600:
+                self.baseline = None  # older than 10 minutes: re-measure
+            def unhealthy(b: dict) -> bool:
+                return not b["votes_sent"] or b["error_pct"] > 0 or b["votes_stored"] != b["votes_sent"]
+
+            measured_now = self.baseline is None
+            if measured_now:
                 await self.measure_baseline()
-            if (not self.baseline["votes_sent"] or self.baseline["error_pct"] > 0
-                    or self.baseline["votes_stored"] != self.baseline["votes_sent"]):
+            if measured_now and unhealthy(self.baseline):
+                # e.g. a backlog from the previous experiment is still draining: give it time, measure once more
+                await self.clock.sleep(15.0)
+                await self.measure_baseline()
+            if unhealthy(self.baseline):
+                self.baseline = None  # never keep an unhealthy baseline: the next run measures again
                 raise RuntimeError("Baseline is not healthy: all probe units must be acknowledged and stored before injecting a fault")
             original = await self.runner.snapshot()
             if self._expected is None:
@@ -328,6 +345,16 @@ class Engine:
                 await self.runner.restore_all(original, self.order)
                 notes.append(f"Secondary failure: {', '.join(broken)} failed after the fault was removed and stayed down "
                              f"until Chaos Sentinel restarted it.")
+            # containers running is not enough: the application itself must answer again
+            if not await self._app_ready_within(30.0):
+                entry = self.target.entry
+                await self.runner.restart(entry)
+                ok = await self._app_ready_within(120.0)
+                notes.append(f"Secondary failure: the {entry} application stayed unresponsive after the fault was removed "
+                             f"(its containers were running); Chaos Sentinel restarted {entry}"
+                             + ("." if ok else ", and it is still not answering."))
+            if notes:
+                self.baseline = None  # the app was disrupted beyond the experiment: measure a fresh baseline next time
 
             result = self._result(run_id, exp, label, probe, started_wall, restored_at)
             result["notes"] = notes
@@ -370,6 +397,15 @@ class Engine:
                 await c()
             except Exception:  # a failed cleanup must not stop the restore
                 pass
+
+    async def _app_ready_within(self, max_s: float) -> bool:
+        waited = 0.0
+        while True:
+            ok, _ = await self.target.app_ready(self.runner)
+            if ok or waited >= max_s:
+                return ok
+            await self.clock.sleep(2.0)
+            waited += 2.0
 
     def _enter(self, phase: str) -> None:
         """Move to a phase and remember it, so the UI never shows phases that did not run (e.g. after a refused start)."""
