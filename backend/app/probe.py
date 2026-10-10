@@ -1,0 +1,153 @@
+"""The probe: sends units at a steady rate and classifies each one by business outcome, not by HTTP status alone.
+
+Unit states (contract VoteState): pending (no answer yet), error (5xx or timeout), queued (acknowledged, not stored yet),
+ok (acknowledged and found in the database), lost (acknowledged, then neither stored nor queued: silent data loss).
+"""
+from __future__ import annotations
+
+import asyncio
+import math
+from dataclasses import dataclass
+
+SLA_S = 2.0  # a unit is healthy when it is stored within this many seconds of being sent
+WINDOW_S = 3.0  # guard window for error rate and p95
+POLL_S = 0.5
+
+
+@dataclass
+class Unit:
+    n: int
+    id: str
+    sent: float
+    done: float | None = None
+    code: int | None = None
+    latency_ms: float | None = None
+    stored_at: float | None = None
+    missing: int = 0
+    lost: bool = False
+
+    @property
+    def acked(self) -> bool:
+        return self.code == 200
+
+    def state(self) -> str:
+        if self.done is None:
+            return "pending"
+        if not self.acked:
+            return "error"
+        if self.stored_at is not None:
+            return "ok"
+        return "lost" if self.lost else "queued"
+
+    def good(self) -> bool:
+        return self.acked and self.stored_at is not None and self.stored_at - self.sent <= SLA_S
+
+    def decided(self, now: float) -> bool:
+        return self.done is not None and (not self.acked or self.stored_at is not None or self.lost
+                                          or now - self.sent > SLA_S)
+
+
+def p95(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, math.ceil(0.95 * len(ordered)) - 1)]
+
+
+class Probe:
+    def __init__(self, client, clock, rate: float, run_id: str):
+        self.client, self.clock, self.rate = client, clock, rate
+        self.prefix = f"cs-{run_id}-"
+        self.units: list[Unit] = []
+        self.sending = False
+        self._tasks: set[asyncio.Task] = set()
+        self._loops: list[asyncio.Task] = []
+        self.db_visible = True
+
+    def start(self) -> None:
+        self.sending = True
+        self._loops = [asyncio.create_task(self._send_loop()), asyncio.create_task(self._poll_loop())]
+
+    async def _send_loop(self) -> None:
+        n, nxt = 0, self.clock.now()
+        while self.sending:
+            unit = Unit(n, f"{self.prefix}{n}", self.clock.now())
+            self.units.append(unit)
+            task = asyncio.create_task(self._one(unit))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            n += 1
+            nxt += 1 / self.rate
+            await self.clock.sleep(nxt - self.clock.now())
+
+    async def _one(self, unit: Unit) -> None:
+        try:
+            code, latency = await self.client.send(unit.id)
+        except Exception:  # a probe failure is an error unit, never a crash of the tool
+            code, latency = None, (self.clock.now() - unit.sent) * 1000
+        unit.code, unit.latency_ms, unit.done = code, latency, self.clock.now()
+
+    async def _poll_loop(self) -> None:
+        while True:
+            await self.clock.sleep(POLL_S)
+            await self.poll()
+
+    async def poll(self, final: bool = False) -> None:
+        """Business check: which acknowledged units reached the database, which still sit in the queue."""
+        queued = await self.client.queued_ids(self.prefix)
+        stored = await self.client.stored_ids(self.prefix)
+        self.db_visible = stored is not None
+        if stored is None:
+            return
+        now = self.clock.now()
+        for u in self.units:
+            if not u.acked or u.stored_at is not None:
+                continue
+            if u.id in stored:
+                u.stored_at, u.lost, u.missing = now, False, 0
+            elif queued is not None and u.id not in queued and now - u.done > 1.0:
+                u.missing += 1  # two polls in a row rule out a unit caught between LPOP and INSERT
+                u.lost = final or u.missing >= 2
+            else:
+                u.missing = 0
+
+    async def stop_sending(self) -> None:
+        self.sending = False
+
+    async def drain(self, max_s: float) -> None:
+        """Wait for in-flight requests to answer (they time out on their own)."""
+        waited = 0.0
+        while any(u.done is None for u in self.units) and waited < max_s:
+            await self.clock.sleep(0.1)
+            waited += 0.1
+
+    async def close(self) -> None:
+        self.sending = False
+        for t in [*self._loops, *self._tasks]:
+            t.cancel()
+        await asyncio.gather(*self._loops, *self._tasks, return_exceptions=True)
+        for u in self.units:  # anything still unanswered when the probe closes counts as a timeout
+            if u.done is None:
+                u.done, u.code = self.clock.now(), None
+
+    # ---- views -----------------------------------------------------------------------------------------------
+    def fleet(self, size: int = 100) -> list[str]:
+        return [u.state() for u in self.units[-size:]]
+
+    def counters(self) -> dict:
+        us = self.units
+        return {"sent": len(us), "acked": sum(u.acked for u in us),
+                "stored": sum(u.stored_at is not None for u in us), "lost": sum(u.lost for u in us),
+                "errors": sum(u.done is not None and not u.acked for u in us)}
+
+    def window(self, now: float, span: float = WINDOW_S) -> dict:
+        done = [u for u in self.units if u.done is not None and now - span <= u.done <= now]
+        errors = sum(not u.acked for u in done)
+        # in-flight requests count with their current age, so a hang shows up before it times out
+        latencies = [u.latency_ms or 0.0 for u in done] + [(now - u.sent) * 1000 for u in self.units if u.done is None]
+        return {"completed": len(done), "errors": errors, "error_rate": errors / len(done) if done else 0.0,
+                "p95_ms": p95(latencies)}
+
+    def recovered_since(self, since: float, now: float, need: int = 5) -> bool:
+        decided = [u for u in self.units if u.sent >= since and u.decided(now)]
+        return len(decided) >= need and all(u.good() for u in decided[-need:])

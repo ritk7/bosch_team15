@@ -94,3 +94,14 @@ def tier(name: str) -> Tier:
         if t.name == name:
             return t
     raise KeyError(f"Unknown tier '{name}'. Use one of: {', '.join(t.name for t in TIERS)}")
+
+# Chaos engine settings
+REPO = ROOT.parent
+RUNNER = env("RUNNER", "auto")  # docker | sim | auto
+TARGET = env("TARGET", "voting")
+TARGET_DIR = (REPO / env("TARGET_DIR", "targets/voting")).resolve()
+# 5 units/s, not 10: the voting worker pops one unit per ~100 ms (worker/Program.cs, Thread.Sleep(100)), so at 10/s its
+# queue can never drain after a fault. 5/s leaves it headroom to catch up, which is what recovery measures.
+PROBE_RATE = float(env("PROBE_RATE", "5"))
+FAULT_S = float(env("FAULT_S", "10"))
+SIM_SPEED = float(env("SIM_SPEED", "1"))  # >1 compresses simulated time (tests)

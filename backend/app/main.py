@@ -1,15 +1,32 @@
-"""HTTP routes. Stub: the skeleton starts, the real routes are listed in docs/CONTRACT.md and still to be written."""
+"""HTTP routes from docs/CONTRACT.md."""
 from __future__ import annotations
 
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from . import config, ledger, llm
+from . import config, ledger, llm, state, targets
+from .campaign import Busy, Engine
+from .runner import make_runner
 
 TITLE = "Chaos Sentinel"
+engine: Engine | None = None
 
-app = FastAPI(title=TITLE)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    global engine
+    target = targets.load()
+    engine = Engine(target, make_runner(target))
+    await engine.recover_on_startup()  # undo a fault left behind by a crash of this process
+    yield
+    if engine.busy:
+        await engine.killswitch()
+
+
+app = FastAPI(title=TITLE, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -18,10 +35,98 @@ app.add_middleware(
 )
 
 
+def eng() -> Engine:
+    if engine is None:
+        raise HTTPException(503, "The engine is starting")
+    return engine
+
+
+def idle() -> Engine:
+    e = eng()
+    if e.busy:
+        raise HTTPException(409, "An experiment is running. Wait for it or press the kill switch.")
+    return e
+
+
 @app.get("/api/health")
 async def health() -> dict:
+    ready, detail = (await eng().runner.ready()) if engine else (False, "Starting")
     return {"ok": True, "title": TITLE, "tiers": await llm.status(),
-            "runner": {"kind": "sim", "ready": False, "detail": "Runner not built yet"}}
+            "runner": {"kind": engine.runner.kind if engine else "sim", "ready": ready, "detail": detail}}
+
+
+@app.get("/api/target")
+async def target() -> dict:
+    e = eng()
+    compose = e.target.compose_file()
+    try:
+        compose_name = str(compose.relative_to(config.REPO))
+    except ValueError:
+        compose_name = str(compose)
+    return {"name": e.target.name, "compose_file": compose_name, "graph": e.graph,
+            "assumptions": e.target.assumptions(e.rate), "services": await e.runner.services(), "unit": e.target.unit}
+
+
+@app.post("/api/target/start")
+async def target_start() -> dict:
+    return {"ok": True, "detail": await idle().runner.up()}
+
+
+@app.post("/api/target/stop")
+async def target_stop() -> dict:
+    return {"ok": True, "detail": await idle().runner.down()}
+
+
+@app.get("/api/catalog")
+def catalog() -> dict:
+    return {"experiments": eng().catalog}
+
+
+@app.post("/api/baseline")
+async def baseline(body: dict = Body(default={})) -> dict:
+    duration = float(body.get("duration_s") or 5)
+    if not 1 <= duration <= 60:
+        raise HTTPException(422, "duration_s must be between 1 and 60")
+    return await idle().measure_baseline(duration)
+
+
+@app.post("/api/predict")
+async def predict(body: dict = Body(...)) -> dict:
+    e = eng()
+    try:
+        return await e.predict(str(body.get("experiment_id")))
+    except KeyError:
+        raise HTTPException(404, f"Unknown experiment '{body.get('experiment_id')}'") from None
+
+
+@app.post("/api/run")
+async def run(body: dict = Body(...)) -> dict:
+    e = eng()
+    fault_s = body.get("fault_duration_s")
+    if fault_s is not None and not 1 <= float(fault_s) <= 30:
+        raise HTTPException(422, "fault_duration_s must be between 1 and 30")
+    try:
+        return {"run_id": e.start_run(str(body.get("experiment_id")), str(body.get("label") or "before"),
+                                      float(fault_s) if fault_s is not None else None)}
+    except KeyError:
+        raise HTTPException(404, f"Unknown experiment '{body.get('experiment_id')}'") from None
+    except Busy as err:
+        raise HTTPException(409, str(err)) from None
+
+
+@app.post("/api/killswitch")
+async def killswitch() -> dict:
+    return {"ok": True, "restored": await eng().killswitch()}
+
+
+@app.get("/api/state")
+async def get_state() -> dict:
+    return await eng().state_json()
+
+
+@app.get("/api/snapshot")
+async def snapshot() -> dict:
+    return state.load_snapshot() or await eng().state_json()
 
 
 @app.get("/api/ledger")

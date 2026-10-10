@@ -54,7 +54,10 @@ workflow lives in docs/DEMO.md or `.github/workflows/chaos-gate.yml`.
 whole product demos and tests with no Docker. The UI must show a clear "Simulation" badge in sim mode and "Docker" otherwise.
 
 ## Defaults
-- probe rate: 10 votes/s (one fresh voter per vote). The fleet grid shows the last 100 probe votes.
+- probe rate: 5 votes/s (one fresh voter per vote; `PROBE_RATE` overrides). Not 10: the worker pops one vote per ~100 ms
+  (worker/Program.cs), so at 10/s its queue can never drain after a fault. The fleet grid shows the last 100 probe votes.
+- a vote is healthy when stored within 2 s of being sent; `lost` = acknowledged, then neither in Postgres nor still queued in Redis.
+  Recovery = from the first unhealthy vote after the fault to the start of the final unbroken run of at least 5 healthy votes.
 - phases per experiment: `baseline` (already measured once, reused) → `inject` (fault_duration_s=10) → `observe`
   → `restore` → `recover` (until 5 consecutive successful votes, max 30 s) → `settle` (3 s) → `done`.
 - guard thresholds: error_rate over the last 3 s >= 0.6, or p95 latency >= 3000 ms, or unhealthy_services >= 3

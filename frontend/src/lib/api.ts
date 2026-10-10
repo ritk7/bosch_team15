@@ -1,4 +1,4 @@
-// Types follow docs/CONTRACT.md. Keep both in sync. Only the parts the skeleton uses are here so far.
+// Types follow docs/CONTRACT.md field for field. Keep both in sync in the same change.
 
 export type Severity = "critical" | "high" | "medium" | "low";
 export type Source = "rules" | "local" | "small" | "large" | "cache";
@@ -31,11 +31,219 @@ export interface TierStatus {
   available: boolean;
 }
 
+export type RunnerKind = "docker" | "sim";
+export type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
+export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "latency";
+export type Confidence = "low" | "medium" | "high";
+export type Phase = "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
+export type VoteState = "ok" | "queued" | "error" | "lost" | "pending";
+
+export interface GraphNode {
+  id: string;
+  role: "web" | "api" | "worker" | "cache" | "queue" | "database" | "other";
+  image: string;
+  ports: string[];
+  healthcheck: boolean;
+  restart: string | null;
+  stateful: boolean;
+  replicas: number;
+  depends_on: string[];
+  fan_in: number;
+  spof: boolean;
+  notes: string[];
+}
+export interface GraphEdge {
+  from: string;
+  to: string;
+  kind: "depends_on" | "dataflow";
+  label: string;
+}
+export interface Graph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export interface Experiment {
+  id: string;
+  type: FailureType;
+  target: string;
+  title: string;
+  description: string;
+  params: Record<string, number | string>;
+  risk_hint: number;
+}
+
+export interface Prediction {
+  experiment_id: string;
+  summary: string;
+  expected_error_pct: number;
+  expected_votes_lost: number;
+  expected_recovery_s: number;
+  confidence: Confidence;
+  reason: string;
+  hypothesis: string;
+  decided_by: Source;
+  model: string;
+}
+
+export interface TimelinePoint {
+  t: number;
+  ok: number;
+  err: number;
+  p95_ms: number;
+  error_rate: number;
+  unhealthy: number;
+}
+
+export interface Outcome {
+  sent: number;
+  acked: number;
+  stored: number;
+  lost: number;
+  errors: number;
+  error_pct: number;
+  p95_ms: number;
+  peak_p95_ms: number;
+  recovery_s: number | null;
+  availability_pct: number;
+  guard_tripped: boolean;
+  guard_reason: string | null;
+  data_loss: boolean;
+}
+
+export interface ExperimentResult {
+  run_id: string;
+  experiment: Experiment;
+  prediction: Prediction | null;
+  outcome: Outcome;
+  timeline: TimelinePoint[];
+  fleet: VoteState[];
+  started_at: number;
+  duration_s: number;
+  label: string;
+  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+}
+
+export interface Pick {
+  experiment_id: string;
+  reason: string;
+  hypothesis: string;
+  decided_by: Source;
+  model: string;
+  order: number;
+}
+export interface Finding {
+  id: string;
+  service: string;
+  experiment_id: string;
+  severity: Severity;
+  title: string;
+  evidence: string[];
+  impact: string;
+  confidence: Confidence;
+}
+export interface Fix {
+  id: string;
+  finding_id: string;
+  title: string;
+  change_type: "compose" | "config" | "code" | "process";
+  snippet: string;
+  steps: string[];
+  expected_score_gain: number;
+  auto_applicable: boolean;
+}
+export interface Score {
+  value: number;
+  breakdown: { name: string; points: number; max: number; note: string }[];
+}
+
+export interface ServiceStatus {
+  id: string;
+  state: ServiceState;
+  health: "healthy" | "unhealthy" | "none";
+  restarts: number;
+  cpu_pct: number | null;
+  mem_mb: number | null;
+}
+
+export interface Unit {
+  singular: string;
+  plural: string;
+  stored: string;
+  lost: string;
+}
+
+export interface Target {
+  name: string;
+  compose_file: string;
+  graph: Graph;
+  assumptions: string[];
+  services: ServiceStatus[];
+  unit: Unit;
+}
+
+export interface GuardView {
+  armed: boolean;
+  tripped: boolean;
+  reason: string | null;
+  thresholds: { error_rate: number; p95_ms: number; unhealthy: number; max_wall_s: number };
+  seconds_left: number;
+}
+
+export interface Counters {
+  sent: number;
+  acked: number;
+  stored: number;
+  lost: number;
+  errors: number;
+}
+
+export interface Current {
+  run_id: string;
+  experiment: Experiment;
+  prediction: Prediction | null;
+  label: string;
+  elapsed_s: number;
+  fault_duration_s: number;
+  timeline: TimelinePoint[];
+  fleet: VoteState[];
+  guard: GuardView;
+  counters: Counters;
+}
+
+export interface Baseline {
+  rps: number;
+  error_pct: number;
+  p95_ms: number;
+}
+
+export interface State {
+  runner: { kind: RunnerKind; ready: boolean; detail: string };
+  services: ServiceStatus[];
+  baseline: Baseline | null;
+  phase: Phase;
+  current: Current | null;
+  results: ExperimentResult[];
+  campaign: {
+    status: "idle" | "running" | "done" | "stopped";
+    strategy: "ai" | "random";
+    budget: number;
+    picks: Pick[];
+    remaining: string[];
+  };
+  analysis: null | { findings: Finding[]; score: Score; decided_by: Source; model: string };
+  fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
+  applied_fixes: string[];
+  compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
+  cost: CostSummary;
+  error: string | null;
+}
+
 export interface Health {
   ok: boolean;
   title: string;
   tiers: Record<"local" | "small" | "large", TierStatus>;
-  runner: { kind: "docker" | "sim"; ready: boolean; detail: string };
+  runner: { kind: RunnerKind; ready: boolean; detail: string };
 }
 
 export interface LedgerEntry {
@@ -75,8 +283,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+const post = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+
 export const api = {
   health: () => request<Health>("/api/health"),
+  target: () => request<Target>("/api/target"),
+  startTarget: () => post<{ ok: boolean; detail: string }>("/api/target/start"),
+  stopTarget: () => post<{ ok: boolean; detail: string }>("/api/target/stop"),
+  catalog: () => request<{ experiments: Experiment[] }>("/api/catalog"),
+  baseline: (duration_s?: number) =>
+    post<{ rps: number; error_pct: number; p95_ms: number; votes_sent: number; votes_stored: number }>("/api/baseline", {
+      duration_s,
+    }),
+  predict: (experiment_id: string) => post<Prediction>("/api/predict", { experiment_id }),
+  run: (experiment_id: string, label?: string, fault_duration_s?: number) =>
+    post<{ run_id: string }>("/api/run", { experiment_id, label, fault_duration_s }),
+  killswitch: () => post<{ ok: boolean; restored: string[] }>("/api/killswitch"),
+  state: () => request<State>("/api/state"),
+  snapshot: () => request<State>("/api/snapshot"),
   ledger: () => request<{ summary: CostSummary; entries: LedgerEntry[] }>("/api/ledger"),
   resetLedger: () => request<{ ok: boolean }>("/api/ledger/reset", { method: "POST" }),
 };
