@@ -125,6 +125,7 @@ interface Score { value: number /* 0..100 */; breakdown: { name: string; points:
 | POST `/fixes` | | `{fixes:Fix[], decided_by:Source, model:string}` fix agent over findings |
 | POST `/apply-fixes` | `{fix_ids:string[]}` | `{ok, overlay:string, detail}` writes `docker-compose.fixes.yml` override and applies it (engineer approval) |
 | POST `/rerun` | `{experiment_ids?:string[]}` | `{ok, experiments}` re-runs (default: the experiments behind applied fixes), labelled "after fix", then analyzes |
+| POST `/twin` | | `{ok}` rehearses the whole catalog on the digital twin; results in `state.twin` and `state.compare` |
 | POST `/reset` | | `{ok, detail}` removes applied fixes and clears runs (demo reset) |
 | GET `/targets`, POST `/target/select` | `{name}` | list targets / switch the app under test (voting, hawkbit) |
 | GET `/report` | | `{markdown:string, score:Score\|null, score_history:{label:string,value:number,ts:number}[]}` |
@@ -140,6 +141,7 @@ interface State {
   services: ServiceStatus[];
   baseline: { rps: number; error_pct: number; p95_ms: number } | null;
   phase: "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
+  busy: boolean;                          // an experiment, re-run, campaign or twin rehearsal is in progress
   current: null | { run_id: string; experiment: Experiment; prediction: Prediction | null; label: string;
     elapsed_s: number; fault_duration_s: number; timeline: TimelinePoint[]; fleet: VoteState[];
     guard: { armed: boolean; tripped: boolean; reason: string | null;
@@ -152,6 +154,8 @@ interface State {
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
   score_history: { label: string; value: number; ts: number }[];   // one entry per /analyze, "before fix" / "after fix"
+  twin: null | { status: "running" | "done"; rows: { experiment_id: string; title: string; target: string; type: FailureType;
+    penalty: number; error_pct: number; lost: number; recovery_s: number | null; guard_tripped: boolean }[]; ran_at: number; seconds?: number };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;                      // as in the kit's ledger.summary()
   error: string | null;

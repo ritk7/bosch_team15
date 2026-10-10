@@ -223,6 +223,7 @@ export interface State {
   services: ServiceStatus[];
   baseline: Baseline | null;
   phase: Phase;
+  busy: boolean;
   current: Current | null;
   results: ExperimentResult[];
   campaign: {

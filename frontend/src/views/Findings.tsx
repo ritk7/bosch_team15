@@ -15,7 +15,7 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string[]>([]);
-  const running = !["idle", "done"].includes(state.phase);
+  const running = state.busy || !["idle", "done"].includes(state.phase);
   const a = state.analysis;
   const fx = state.fixes;
   const hist = state.score_history ?? [];

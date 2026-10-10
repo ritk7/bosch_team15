@@ -9,7 +9,7 @@ from app import config, main, state
 from app.runner import SimRunner
 from app.sim import Clock
 
-STATE_KEYS = {"runner", "services", "baseline", "phase", "current", "results", "campaign", "analysis", "fixes",
+STATE_KEYS = {"runner", "services", "baseline", "phase", "busy", "current", "results", "campaign", "analysis", "fixes",
               "applied_fixes", "score_history", "twin", "compare", "cost", "error"}
 NODE_KEYS = {"id", "role", "image", "ports", "healthcheck", "restart", "stateful", "replicas", "depends_on", "fan_in",
              "spof", "notes"}

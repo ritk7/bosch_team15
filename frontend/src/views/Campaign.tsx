@@ -7,7 +7,7 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
   const [budget, setBudget] = useState(5);
   const [error, setError] = useState<string | null>(null);
   const c = state.campaign;
-  const running = !["idle", "done"].includes(state.phase) || c.status === "running" || state.twin?.status === "running";
+  const running = state.busy || !["idle", "done"].includes(state.phase);
   const byId = new Map(catalog.map((e) => [e.id, e]));
   const result = (id: string) => [...state.results].reverse().find((r) => r.experiment.id === id);
 
