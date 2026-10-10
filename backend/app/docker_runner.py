@@ -274,6 +274,19 @@ class DockerRunner:
                 await self._wait_up(name)
         return restored
 
+    async def wait_ready(self, order: list[str], max_s: float = 90.0) -> bool:
+        for svc in order:
+            await self._wait_up(svc, max_s)
+        return True
+
+    async def apply_overlay(self, services: list[str], reset: bool = False) -> None:
+        """Recreate the services whose compose settings changed (the override file is included by compose_args)."""
+        for svc in services:
+            self._check(svc)
+        await self._compose("up", "-d", "--no-build", *services, timeout=180)
+        for svc in services:
+            await self._wait_up(svc, 60)
+
     async def up(self) -> str:
         await self._compose("up", "-d", "--build", timeout=900)
         return f"docker compose up -d done for project '{self.project}'"

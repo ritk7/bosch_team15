@@ -131,6 +131,17 @@ class SimRunner:
                 await self.clock.sleep(0.1)
         return restored
 
+    async def wait_ready(self, order: list[str], max_s: float = 90.0) -> bool:
+        """Pre-flight: every running service answers before a new experiment starts."""
+        waited = 0.0
+        while waited < max_s:
+            snap = await self.snapshot()
+            if all(self.app.is_up(n) for n in order if n in snap and snap[n]["state"] == "running"):
+                return True
+            await self.clock.sleep(0.25)
+            waited += 0.25
+        return False
+
     async def up(self) -> str:
         self.reset()
         return "Simulation reset: all services running"
@@ -140,10 +151,15 @@ class SimRunner:
             self.app.stop(name)
         return "Simulation stopped: all services down"
 
-    def set_policies(self, policies: dict[str, str | None]) -> None:
-        for name, policy in policies.items():
+    async def apply_overlay(self, services: list[str], reset: bool = False) -> None:
+        """The overlay changed restart policies: give the simulated containers the policies from the merged graph."""
+        if reset:
+            self.reset()
+            return
+        policies = {n["id"]: n["restart"] for n in self.target.graph()["nodes"]}
+        for name in services:
             if name in self.app.svcs:
-                self.app.svcs[name].restart_policy = policy
+                self.app.svcs[name].restart_policy = policies.get(name)
 
     def client(self):
         return self.target.sim_client(self.app, self.clock)

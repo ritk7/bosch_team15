@@ -70,7 +70,7 @@ type RunnerKind = "docker" | "sim";
 type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
 type Source = "rules" | "local" | "small" | "large" | "cache";           // who decided; matches the cost ledger
 type Severity = "critical" | "high" | "medium" | "low";
-type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "latency"; // latency optional
+type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "latency"; // latency optional
 
 interface GraphNode { id: string; role: "web" | "api" | "worker" | "cache" | "queue" | "database" | "other";
   image: string; ports: string[]; healthcheck: boolean; restart: string | null; stateful: boolean;
@@ -95,7 +95,8 @@ interface Outcome { sent: number; acked: number; stored: number; lost: number; e
 
 interface ExperimentResult { run_id: string; experiment: Experiment; prediction: Prediction | null; outcome: Outcome;
   timeline: TimelinePoint[]; fleet: VoteState[]; started_at: number; duration_s: number; label: string /* "before" | "after fix" | free text */;
-  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null; }
+  prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+  notes: string[] /* e.g. a secondary failure the final safety check repaired */; }
 
 interface Pick { experiment_id: string; reason: string; hypothesis: string; decided_by: Source; model: string; order: number; }
 interface Finding { id: string; service: string; experiment_id: string; severity: Severity; title: string;
@@ -123,6 +124,9 @@ interface Score { value: number /* 0..100 */; breakdown: { name: string; points:
 | POST `/analyze` | | `{findings:Finding[], score:Score, decided_by:Source, model:string}` risk agent over all results |
 | POST `/fixes` | | `{fixes:Fix[], decided_by:Source, model:string}` fix agent over findings |
 | POST `/apply-fixes` | `{fix_ids:string[]}` | `{ok, overlay:string, detail}` writes `docker-compose.fixes.yml` override and applies it (engineer approval) |
+| POST `/rerun` | `{experiment_ids?:string[]}` | `{ok, experiments}` re-runs (default: the experiments behind applied fixes), labelled "after fix", then analyzes |
+| POST `/reset` | | `{ok, detail}` removes applied fixes and clears runs (demo reset) |
+| GET `/targets`, POST `/target/select` | `{name}` | list targets / switch the app under test (voting, hawkbit) |
 | GET `/report` | | `{markdown:string, score:Score\|null, score_history:{label:string,value:number,ts:number}[]}` |
 | GET `/report.md` | | the markdown as a download |
 | GET `/architecture.md` | | architecture overview markdown (hackathon deliverable) |
@@ -147,6 +151,7 @@ interface State {
   analysis: null | { findings: Finding[]; score: Score; decided_by: Source; model: string };
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
+  score_history: { label: string; value: number; ts: number }[];   // one entry per /analyze, "before fix" / "after fix"
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;                      // as in the kit's ledger.summary()
   error: string | null;

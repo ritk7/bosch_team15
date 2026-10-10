@@ -122,6 +122,7 @@ export interface ExperimentResult {
   duration_s: number;
   label: string;
   prediction_error: { errors_pct_points: number; votes_lost: number; recovery_s: number } | null;
+  notes?: string[];
 }
 
 export interface Pick {
@@ -234,6 +235,7 @@ export interface State {
   analysis: null | { findings: Finding[]; score: Score; decided_by: Source; model: string };
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
+  score_history: { label: string; value: number; ts: number }[];
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;
   error: string | null;
@@ -303,6 +305,11 @@ export const api = {
     post<{ run_id: string }>("/api/run", { experiment_id, label, fault_duration_s }),
   killswitch: () => post<{ ok: boolean; restored: string[] }>("/api/killswitch"),
   state: () => request<State>("/api/state"),
+  analyze: () => post<{ findings: Finding[]; score: Score; decided_by: Source; model: string }>("/api/analyze"),
+  fixes: () => post<{ fixes: Fix[]; decided_by: Source; model: string }>("/api/fixes"),
+  applyFixes: (fix_ids: string[]) => post<{ ok: boolean; overlay: string; detail: string }>("/api/apply-fixes", { fix_ids }),
+  rerun: (experiment_ids?: string[]) => post<{ ok: boolean; experiments: string[] }>("/api/rerun", { experiment_ids }),
+  reset: () => post<{ ok: boolean; detail: string }>("/api/reset"),
   snapshot: () => request<State>("/api/snapshot"),
   ledger: () => request<{ summary: CostSummary; entries: LedgerEntry[] }>("/api/ledger"),
   resetLedger: () => request<{ ok: boolean }>("/api/ledger/reset", { method: "POST" }),

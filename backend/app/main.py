@@ -138,6 +138,44 @@ async def killswitch() -> dict:
     return {"ok": True, "restored": await eng().killswitch()}
 
 
+@app.post("/api/analyze")
+async def analyze() -> dict:
+    e = idle()
+    if not e.results:
+        raise HTTPException(409, "Run at least one experiment first")
+    return await e.analyze()
+
+
+@app.post("/api/fixes")
+async def get_fixes() -> dict:
+    e = idle()
+    if not e.results:
+        raise HTTPException(409, "Run at least one experiment first")
+    fx = await e.recommend()
+    return {**fx, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")} for x in fx["fixes"]]}
+
+
+@app.post("/api/apply-fixes")
+async def apply_fixes(body: dict = Body(...)) -> dict:
+    try:
+        return await idle().apply_fixes([str(i) for i in body.get("fix_ids") or []])
+    except ValueError as err:
+        raise HTTPException(422, str(err)) from None
+
+
+@app.post("/api/rerun")
+async def rerun(body: dict = Body(default={})) -> dict:
+    try:
+        return {"ok": True, "experiments": idle().start_rerun(body.get("experiment_ids"))}
+    except KeyError as err:
+        raise HTTPException(404, f"Unknown experiment {err}") from None
+
+
+@app.post("/api/reset")
+async def reset_demo() -> dict:
+    return {"ok": True, "detail": await idle().reset_demo()}
+
+
 @app.get("/api/state")
 async def get_state() -> dict:
     return await eng().state_json()

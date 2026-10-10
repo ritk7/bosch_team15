@@ -9,7 +9,7 @@ import asyncio
 import secrets
 import time
 
-from . import agents, config, injectors, ledger, mapper, state
+from . import agents, analysis, config, fixes, injectors, ledger, mapper, score, state
 from .guard import Guard
 from .probe import Probe, p95
 from .runner import differs
@@ -39,6 +39,10 @@ class Engine:
         self._probe: Probe | None = None
         self._services: list[dict] = []
         self._cleanups: list = []
+        self.analysis: dict | None = None
+        self.fixes: dict | None = None
+        self.applied_fixes: list[str] = []
+        self.score_history: list[dict] = []
         self.refresh_graph()
 
     # ---- graph ---------------------------------------------------------------------------------------------
@@ -120,6 +124,7 @@ class Engine:
             if self.baseline is None:
                 self.phase = "baseline"
                 await self.measure_baseline()
+            await self.runner.wait_ready(self.order)  # start every experiment from a healthy app
             original = await self.runner.snapshot()
             probe = self._probe = Probe(self.runner.client(), self.clock, self.rate, run_id)
             t_begin = self.clock.now()
@@ -261,6 +266,71 @@ class Engine:
                 "fleet": probe.fleet(), "started_at": started_wall, "duration_s": round(time.time() - started_wall, 1),
                 "label": label, "prediction_error": perr}
 
+    # ---- analysis, fixes, re-run ---------------------------------------------------------------------------
+    async def analyze(self) -> dict:
+        found, source, model = await analysis.findings(self.results, self.graph, self.target.unit, self.runner.kind)
+        sc = score.compute(self.results, self.graph)
+        self.analysis = {"findings": found, "score": sc, "decided_by": source, "model": model}
+        label = "after fix" if self.applied_fixes else "before fix"
+        self.score_history.append({"label": label, "value": sc["value"], "ts": time.time()})
+        return self.analysis
+
+    async def recommend(self) -> dict:
+        if self.analysis is None:
+            await self.analyze()
+        assert self.analysis is not None
+        fx, source, model = await analysis.recommend(self.analysis["findings"], self.results, self.graph)
+        self.fixes = {"fixes": fx, "decided_by": source, "model": model}
+        return self.fixes
+
+    async def apply_fixes(self, fix_ids: list[str]) -> dict:
+        """Engineer-approved: write the override and recreate only the services it changes."""
+        if self.busy:
+            raise Busy("An experiment is running")
+        chosen = [x for x in (self.fixes or {}).get("fixes", []) if x["id"] in fix_ids]
+        if not chosen:
+            raise ValueError("No such fixes. Run /api/fixes first.")
+        advice = [x["id"] for x in chosen if not x["auto_applicable"]]
+        if advice:
+            raise ValueError(f"{', '.join(advice)} are advice only and cannot be applied automatically")
+        restart = {svc: "unless-stopped" for x in chosen for svc in x.get("_services", [])}
+        overlay = fixes.write_overlay(self.target.overlay_file(), restart, {n["id"] for n in self.graph["nodes"]})
+        self.refresh_graph()
+        await self.runner.apply_overlay(sorted(restart))
+        self.applied_fixes = sorted(set(self.applied_fixes) | {x["id"] for x in chosen})
+        return {"ok": True, "overlay": overlay,
+                "detail": f"restart: unless-stopped on {', '.join(sorted(restart))}; re-run the experiments to prove it"}
+
+    def start_rerun(self, exp_ids: list[str] | None = None) -> list[str]:
+        if self.busy:
+            raise Busy("An experiment is running")
+        if not exp_ids:
+            fx = [x for x in (self.fixes or {}).get("fixes", []) if x["id"] in self.applied_fixes]
+            fids = {fid for x in fx for fid in x.get("_findings", [x["finding_id"]])}
+            exp_ids = [f["experiment_id"] for f in (self.analysis or {}).get("findings", []) if f["id"] in fids] or \
+                [r["experiment"]["id"] for r in score.latest(self.results)]
+        exps = [self.experiment(i) for i in dict.fromkeys(exp_ids)]
+
+        async def sequence() -> None:
+            for exp in exps:
+                await self.predict(exp["id"])
+                await self.run(f"r{secrets.token_hex(3)}", exp, "after fix", config.FAULT_S)
+            await self.analyze()
+
+        self.task = asyncio.create_task(sequence())
+        return [e["id"] for e in exps]
+
+    async def reset_demo(self) -> str:
+        """Undo applied fixes and clear runs, so the next judge sees the original app."""
+        if self.busy:
+            raise Busy("An experiment is running")
+        fixes.clear_overlay(self.target.overlay_file())
+        self.refresh_graph()
+        await self.runner.apply_overlay([n["id"] for n in self.graph["nodes"]], reset=True)
+        self.results, self.analysis, self.fixes, self.applied_fixes = [], None, None, []
+        self.score_history, self.current, self.phase, self.error = [], None, "idle", None
+        return "Fixes removed and runs cleared"
+
     # ---- kill switch ---------------------------------------------------------------------------------------
     async def killswitch(self) -> list[str]:
         """Stop whatever is running and put every service back the way it was before the fault."""
@@ -293,9 +363,11 @@ class Engine:
             "current": cur,
             "results": self.results,
             "campaign": {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []},
-            "analysis": None,
-            "fixes": None,
-            "applied_fixes": [],
+            "analysis": self.analysis,
+            "fixes": {**self.fixes, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")}
+                                              for x in self.fixes["fixes"]]} if self.fixes else None,
+            "applied_fixes": self.applied_fixes,
+            "score_history": self.score_history,
             "compare": None,
             "cost": ledger.summary(),
             "error": self.error,
