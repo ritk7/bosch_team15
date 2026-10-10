@@ -33,7 +33,8 @@ export interface TierStatus {
 
 export type RunnerKind = "docker" | "sim";
 export type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
-export type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "latency";
+export type FailureType =
+  | "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "db_overload" | "latency" | "packet_loss";
 export type Confidence = "low" | "medium" | "high";
 export type Phase = "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
 export type VoteState = "ok" | "queued" | "error" | "lost" | "pending";
@@ -157,6 +158,14 @@ export interface Fix {
 export interface Score {
   value: number;
   breakdown: { name: string; points: number; max: number; note: string }[];
+  services?: { service: string; value: number | null; experiments: number; worst: string | null }[];
+}
+
+export interface PlanRow {
+  experiment_id: string;
+  rank: number;
+  priority: number;
+  reason: string;
 }
 
 export interface ServiceStatus {
@@ -217,6 +226,8 @@ export interface Baseline {
   rps: number;
   error_pct: number;
   p95_ms: number;
+  healthy_services?: number;
+  total_services?: number;
 }
 
 export interface State {
@@ -239,6 +250,7 @@ export interface State {
   applied_fixes: string[];
   score_history: { label: string; value: number; ts: number }[];
   twin: null | { status: "running" | "done"; rows: TwinRow[]; ran_at: number; seconds?: number };
+  plan: null | { plan: PlanRow[]; decided_by: Source; model: string };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;
   error: string | null;
@@ -329,6 +341,9 @@ export const api = {
     post<{ ok: boolean }>("/api/campaign/start", { budget, strategy, seed }),
   stopCampaign: () => post<{ ok: boolean; restored: string[] }>("/api/campaign/stop"),
   twin: () => post<{ ok: boolean }>("/api/twin"),
+  plan: () => post<{ plan: PlanRow[]; decided_by: Source; model: string }>("/api/plan"),
+  editEdge: (from: string, to: string, action: "add" | "remove", label?: string) =>
+    post<{ ok: boolean; graph: Graph }>("/api/graph/edge", { from, to, action, label }),
   report: () => request<{ markdown: string; score: Score | null; score_history: { label: string; value: number; ts: number }[] }>("/api/report"),
   snapshot: () => request<State>("/api/snapshot"),
   ledger: () => request<{ summary: CostSummary; entries: LedgerEntry[] }>("/api/ledger"),

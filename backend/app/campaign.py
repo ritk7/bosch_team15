@@ -49,6 +49,7 @@ class Engine:
         self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
         self.compare: dict | None = None
         self.twin: dict | None = None
+        self.plan: dict | None = None
         self.refresh_graph()
 
     # ---- graph ---------------------------------------------------------------------------------------------
@@ -56,7 +57,8 @@ class Engine:
         self.graph = self.target.graph()
         self.sync = mapper.sync_path(self.graph, self.target.entry)
         self.order = mapper.topo_order(self.graph)
-        self.catalog = injectors.catalog(self.graph, self.sync, self.target.entry, self.target.extra_experiments(self.graph))
+        self.catalog = injectors.catalog(self.graph, self.sync, self.target.entry, self.target.extra_experiments(self.graph),
+                                         db_load=(self.target.db_load or {}).get("service"))
         # blast radius: collateral services (not faulted on purpose). Small apps get a tighter limit.
         n = len(self.graph["nodes"])
         self.guard.base = self.guard.thresholds = Thresholds(unhealthy=2 if n >= 4 else 1)
@@ -89,7 +91,7 @@ class Engine:
         self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
         self.applied_fixes = snap.get("applied_fixes") or []
         self.score_history = snap.get("score_history") or []
-        self.compare, self.twin = snap.get("compare"), snap.get("twin")
+        self.compare, self.twin, self.plan = snap.get("compare"), snap.get("twin"), snap.get("plan")
         camp = snap.get("campaign") or {}
         if camp.get("status") == "running":
             camp["status"] = "stopped"
@@ -128,7 +130,10 @@ class Engine:
             await probe.close()
         done = [u for u in probe.units if u.done is not None]
         c = probe.counters()
-        self.baseline = {"rps": round(len(done) / duration_s, 2),
+        svcs = await self.runner.services()
+        healthy = sum(s["state"] == "running" and s["health"] != "unhealthy" for s in svcs)
+        self.baseline = {"rps": round(len(done) / duration_s, 2), "healthy_services": healthy,
+                         "total_services": len(svcs),
                          "error_pct": round(100 * c["errors"] / max(1, c["sent"]), 1),
                          "p95_ms": round(p95([u.latency_ms or 0 for u in done]), 1),
                          "votes_sent": c["sent"], "votes_stored": c["stored"]}
@@ -250,6 +255,11 @@ class Engine:
             result = self._result(run_id, exp, label, probe, started_wall, restored_at)
             result["notes"] = notes
             self.results.append(result)
+            if self.persist:  # live findings and score after every run; "Analyse" rewrites them with the AI
+                self.analysis = {"findings": analysis.rules_findings(self.results, self.graph, self.target.unit,
+                                                                     self.runner.kind),
+                                 "score": score.compute(self.results, self.graph), "decided_by": "rules",
+                                 "model": "rules engine (live)"}
             self.phase = "done"
             return result
         except asyncio.CancelledError:
@@ -418,7 +428,7 @@ class Engine:
                         p = {"experiment": order[i], "reason": f"random order (seed {seed})",
                              "hypothesis": order[i]["description"], "decided_by": "rules", "model": "random"}
                     else:
-                        p = await planner.pick(remaining, done, self.graph)
+                        p = await planner.pick(remaining, done, self.graph, self.twin_penalties())
                     exp = p["experiment"]
                     self.campaign["picks"].append({"experiment_id": exp["id"], "reason": p["reason"],
                                                    "hypothesis": p["hypothesis"], "decided_by": p["decided_by"],
@@ -469,6 +479,15 @@ class Engine:
         self.save()
         return self.twin
 
+    def twin_penalties(self) -> dict[str, float] | None:
+        rows = (self.twin or {}).get("rows") if (self.twin or {}).get("status") == "done" else None
+        return {r["experiment_id"]: r["penalty"] for r in rows} if rows else None
+
+    async def make_plan(self) -> dict:
+        self.plan = await planner.rank_all(self.catalog, self.results, self.graph, self.twin_penalties())
+        self.save()
+        return self.plan
+
     def start_twin(self) -> None:
         if self.busy:
             raise Busy("An experiment is running")
@@ -484,7 +503,7 @@ class Engine:
         self.results, self.analysis, self.fixes, self.applied_fixes = [], None, None, []
         self.score_history, self.current, self.phase, self.error = [], None, "idle", None
         self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
-        self.compare, self.twin = None, None
+        self.compare, self.twin, self.plan = None, None, None
         self.save()
         return "Fixes removed and runs cleared"
 
@@ -516,13 +535,15 @@ class Engine:
             "target": self.target.name,
             "runner": {"kind": self.runner.kind, "ready": ready, "detail": detail},
             "services": self._services,
-            "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms")} if self.baseline else None,
+            "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms", "healthy_services", "total_services")
+                         if k in self.baseline} if self.baseline else None,
             "phase": self.phase,
             "busy": self.busy,
             "current": cur,
             "results": self.results,
             "campaign": self.campaign,
             "twin": self.twin,
+            "plan": self.plan,
             "analysis": self.analysis,
             "fixes": {**self.fixes, "fixes": [{k: v for k, v in x.items() if not k.startswith("_")}
                                               for x in self.fixes["fixes"]]} if self.fixes else None,

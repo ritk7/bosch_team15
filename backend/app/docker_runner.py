@@ -304,6 +304,26 @@ class DockerRunner:
                 await self._wait_up(name)
         return restored
 
+    async def load(self, svc: str, workers: int):
+        """Real query flood: N parallel heavy queries in the database container, each capped at 4 s server-side."""
+        self._check(svc)
+        cmd = (self.target.db_load or {}).get("cmd")
+        if not cmd:
+            raise ValueError(f"No load command for {svc}")
+
+        async def worker() -> None:
+            while True:
+                await self.exec(svc, cmd)
+
+        tasks = [asyncio.create_task(worker()) for _ in range(workers)]
+
+        async def stop() -> None:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        return stop
+
     async def wait_ready(self, order: list[str], max_s: float = 90.0) -> bool:
         for svc in order:
             await self._wait_up(svc, max_s)

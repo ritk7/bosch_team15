@@ -189,3 +189,25 @@ def test_guard_latency_limit_is_relative_to_baseline():
     assert g.thresholds.p95_ms == 5000  # 10x a slow baseline
     g.arm(baseline_p95_ms=20)
     assert g.thresholds.p95_ms == 3000  # never below the 3 s floor
+
+
+def test_db_overload_and_restore():
+    async def go():
+        e = make_engine()
+        original = await e.runner.snapshot()
+        r = await e.run("tload", e.experiment("db-overload-db"), "before", 5.0)
+        return r, original, await e.runner.snapshot()
+
+    r, original, after = run(go())
+    assert r is not None and after == original
+
+
+def test_manual_map_correction(tmp_path):
+    from app import mapper
+
+    t = targets.load("voting")
+    t.target_dir = tmp_path
+    mapper.save_corrections(tmp_path, {"add": [{"from": "result", "to": "redis", "label": "debug read"}],
+                                       "remove": [("worker", "db")]})
+    pairs = {(e["from"], e["to"]) for e in t.graph()["edges"] if e["kind"] == "dataflow"}
+    assert ("result", "redis") in pairs and ("worker", "db") not in pairs

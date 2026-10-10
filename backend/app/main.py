@@ -158,6 +158,36 @@ async def campaign_stop() -> dict:
     return {"ok": True, "restored": await eng().stop_campaign()}
 
 
+@app.post("/api/graph/edge")
+async def edit_edge(body: dict = Body(...)) -> dict:
+    """Manual correction of the map: add or remove a data flow (Bosch: 'manual corrections allowed')."""
+    from . import mapper
+
+    e = idle()
+    src, dst, action = str(body.get("from")), str(body.get("to")), str(body.get("action") or "add")
+    ids = {n["id"] for n in e.graph["nodes"]}
+    if src not in ids or dst not in ids or src == dst:
+        raise HTTPException(422, "from and to must be two different services of the target")
+    c = mapper.load_corrections(e.target.target_dir)
+    c["add"] = [x for x in c["add"] if (x["from"], x["to"]) != (src, dst)]
+    c["remove"] = [x for x in c["remove"] if x != (src, dst)]
+    if action == "add":
+        c["add"].append({"from": src, "to": dst, "label": str(body.get("label") or "added by hand")})
+    elif action == "remove":
+        c["remove"].append((src, dst))
+    else:
+        raise HTTPException(422, "action must be add or remove")
+    mapper.save_corrections(e.target.target_dir, c)
+    e.refresh_graph()
+    return {"ok": True, "graph": e.graph}
+
+
+@app.post("/api/plan")
+async def plan() -> dict:
+    """The AI's ranked plan: every experiment, most informative first, each with a short reason."""
+    return await idle().make_plan()
+
+
 @app.post("/api/twin")
 async def twin() -> dict:
     """Rehearse every experiment on the digital twin in seconds; results land in /state.twin and /state.compare."""

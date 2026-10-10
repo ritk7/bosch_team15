@@ -243,6 +243,8 @@ class HawkbitTarget:
     title = "Bosch hawkBit update server"
     entry = "hawkbit"
     selftest_experiment = "crash-mysql"
+    db_load = {"service": "mysql", "cmd": ["mysql", "-uroot", "-e",
+                                           "SET SESSION max_execution_time = 4000; SELECT BENCHMARK(300000000, SHA2('x', 256))"]}
     unit = {"singular": "device", "plural": "devices", "stored": "updated", "lost": "stuck"}
     roles = {"hawkbit": "api", "mysql": "database", "rabbitmq": "queue"}
     extra_edges = [
@@ -270,7 +272,8 @@ class HawkbitTarget:
         return mapper.load_services(self.compose_file(), self.overlay_file())
 
     def graph(self) -> dict:
-        return mapper.build_graph(self.compose_file(), roles=self.roles, extra_edges=self.extra_edges,
+        return mapper.build_graph(self.compose_file(), roles=self.roles,
+                                  extra_edges=mapper.corrected_edges(self.target_dir, self.extra_edges),
                                   notes=self.notes, overlay=self.overlay_file())
 
     def extra_experiments(self, graph: dict) -> list[dict]:

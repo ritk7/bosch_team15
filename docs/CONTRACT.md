@@ -70,7 +70,7 @@ type RunnerKind = "docker" | "sim";
 type ServiceState = "running" | "stopped" | "paused" | "unhealthy" | "restarting" | "degraded";
 type Source = "rules" | "local" | "small" | "large" | "cache";           // who decided; matches the cost ledger
 type Severity = "critical" | "high" | "medium" | "low";
-type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "latency"; // latency optional
+type FailureType = "crash" | "hang" | "network_cut" | "cpu_throttle" | "traffic_spike" | "compound" | "db_overload" | "latency" | "packet_loss";
 
 interface GraphNode { id: string; role: "web" | "api" | "worker" | "cache" | "queue" | "database" | "other";
   image: string; ports: string[]; healthcheck: boolean; restart: string | null; stateful: boolean;
@@ -103,7 +103,8 @@ interface Finding { id: string; service: string; experiment_id: string; severity
   evidence: string[]; impact: string; confidence: "low" | "medium" | "high"; }
 interface Fix { id: string; finding_id: string; title: string; change_type: "compose" | "config" | "code" | "process";
   snippet: string; steps: string[]; expected_score_gain: number; auto_applicable: boolean; }
-interface Score { value: number /* 0..100 */; breakdown: { name: string; points: number; max: number; note: string }[]; }
+interface Score { value: number /* 0..100 */; breakdown: { name: string; points: number; max: number; note: string }[];
+  services: { service: string; value: number | null /* null = untested */; experiments: number; worst: string | null }[] /* weakest first */; }
 ```
 
 ## Endpoints (all JSON under /api)
@@ -125,6 +126,8 @@ interface Score { value: number /* 0..100 */; breakdown: { name: string; points:
 | POST `/fixes` | | `{fixes:Fix[], decided_by:Source, model:string}` fix agent over findings |
 | POST `/apply-fixes` | `{fix_ids:string[]}` | `{ok, overlay:string, detail}` writes `docker-compose.fixes.yml` override and applies it (engineer approval) |
 | POST `/rerun` | `{experiment_ids?:string[]}` | `{ok, experiments}` re-runs (default: the experiments behind applied fixes), labelled "after fix", then analyzes |
+| POST `/plan` | | `{plan:{experiment_id,rank,priority,reason}[], decided_by, model}` the AI's ranking of every experiment |
+| POST `/graph/edge` | `{from, to, action:"add"\|"remove", label?}` | `{ok, graph}` manual correction of the data flows |
 | POST `/twin` | | `{ok}` rehearses the whole catalog on the digital twin; results in `state.twin` and `state.compare` |
 | POST `/reset` | | `{ok, detail}` removes applied fixes and clears runs (demo reset) |
 | GET `/targets`, POST `/target/select` | `{name}` | list targets / switch the app under test (voting, hawkbit) |
@@ -139,7 +142,7 @@ interface ServiceStatus { id: string; state: ServiceState; health: "healthy" | "
 interface State {
   runner: { kind: RunnerKind; ready: boolean; detail: string };
   services: ServiceStatus[];
-  baseline: { rps: number; error_pct: number; p95_ms: number } | null;
+  baseline: { rps: number; error_pct: number; p95_ms: number; healthy_services: number; total_services: number } | null;
   phase: "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
   busy: boolean;                          // an experiment, re-run, campaign or twin rehearsal is in progress
   current: null | { run_id: string; experiment: Experiment; prediction: Prediction | null; label: string;
@@ -154,6 +157,7 @@ interface State {
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
   score_history: { label: string; value: number; ts: number }[];   // one entry per /analyze, "before fix" / "after fix"
+  plan: null | { plan: { experiment_id: string; rank: number; priority: number; reason: string }[]; decided_by: Source; model: string };
   twin: null | { status: "running" | "done"; rows: { experiment_id: string; title: string; target: string; type: FailureType;
     penalty: number; error_pct: number; lost: number; recovery_s: number | null; guard_tripped: boolean }[]; ran_at: number; seconds?: number };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };

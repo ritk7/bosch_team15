@@ -8,7 +8,8 @@ from typing import Awaitable, Callable
 Cleanup = Callable[[], Awaitable[None]]
 
 # How much a failure type usually hurts, relative to a crash. Used only to rank the catalog before anything is measured.
-TYPE_WEIGHT = {"compound": 1.1, "crash": 1.0, "network_cut": 0.9, "hang": 0.9, "cpu_throttle": 0.6, "traffic_spike": 0.5}
+TYPE_WEIGHT = {"compound": 1.1, "crash": 1.0, "network_cut": 0.9, "hang": 0.9, "db_overload": 0.7, "cpu_throttle": 0.6,
+               "traffic_spike": 0.5, "latency": 0.8, "packet_loss": 0.8}
 
 TEXT = {
     "crash": ("Crash {t}", "Kill the {t} process. It stays down for the fault window unless a restart policy brings it back."),
@@ -16,6 +17,7 @@ TEXT = {
     "network_cut": ("Cut {t} off the network", "Disconnect {t} from the project's networks; it keeps running and keeps its memory."),
     "cpu_throttle": ("Throttle {t} to {cpus} CPU", "Limit {t} to {cpus} of a CPU (docker update --cpus), like an overloaded host."),
     "traffic_spike": ("Traffic spike on {t} ({multiplier}×)", "Send {multiplier} times the normal probe rate to {t} for the fault window."),
+    "db_overload": ("Overload {t} (heavy queries + {cpus} CPU)", "Flood {t} with {workers} parallel heavy queries while limiting it to {cpus} CPU, like a runaway report job."),
 }
 
 
@@ -39,7 +41,8 @@ def _exp(kind: str, node: dict, max_fan: int, sync: set[str], entry: str | None 
             "risk_hint": risk_hint(node, max_fan, t in sync, kind, entry=t == entry)}
 
 
-def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[dict] | None = None) -> list[dict]:
+def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[dict] | None = None,
+            db_load: str | None = None) -> list[dict]:
     nodes = graph["nodes"]
     max_fan = max((n["fan_in"] for n in nodes), default=0)
     out = []
@@ -51,6 +54,8 @@ def catalog(graph: dict, sync: set[str], entry: str | None = None, extra: list[d
             out.append(_exp("network_cut", node, max_fan, sync, entry))
         if node["role"] in ("database", "worker"):
             out.append(_exp("cpu_throttle", node, max_fan, sync, entry, cpus=0.1))
+        if node["id"] == db_load:
+            out.append(_exp("db_overload", node, max_fan, sync, entry, cpus=0.5, workers=4))
         if node["id"] == entry:
             out.append(_exp("traffic_spike", node, max_fan, sync, entry, multiplier=6))
     out += extra or []
@@ -98,6 +103,9 @@ async def apply(runner, exp: dict, probe=None) -> list[Cleanup]:
         await runner.disconnect(t)
     elif kind == "cpu_throttle":
         await runner.set_cpus(t, float(p.get("cpus", 0.1)))
+    elif kind == "db_overload":
+        await runner.set_cpus(t, float(p.get("cpus", 0.5)))  # restored by restore_all
+        return [await runner.load(t, int(p.get("workers", 4)))]
     elif kind == "traffic_spike":
         if probe is None:
             raise ValueError("traffic_spike needs the probe")

@@ -48,6 +48,8 @@ class VotingTarget:
     title = "voting app"
     entry = "vote"  # the probe sends units here
     selftest_experiment = "crash-redis"
+    db_load = {"service": "db", "cmd": ["psql", "-U", "postgres", "-c",
+                                        "SET statement_timeout = 4000; SELECT count(*) FROM generate_series(1, 50000000)"]}
     unit = {"singular": "vote", "plural": "votes", "stored": "stored", "lost": "lost silently"}
     roles = {"vote": "web", "redis": "queue", "worker": "worker", "db": "database", "result": "web"}
     extra_edges = [
@@ -78,7 +80,8 @@ class VotingTarget:
         return mapper.load_services(self.compose_file(), self.overlay_file())
 
     def graph(self) -> dict:
-        return mapper.build_graph(self.compose_file(), roles=self.roles, extra_edges=self.extra_edges,
+        return mapper.build_graph(self.compose_file(), roles=self.roles,
+                                  extra_edges=mapper.corrected_edges(self.target_dir, self.extra_edges),
                                   notes=self.notes, overlay=self.overlay_file())
 
     def extra_experiments(self, graph: dict) -> list[dict]:

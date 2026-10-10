@@ -11,3 +11,4 @@ docker-compose.fixes.yml
 .DS_Store
 .env
 targets/hawkbit-src/
+targets/*/chaos-map.json

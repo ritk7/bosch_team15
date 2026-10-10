@@ -86,3 +86,35 @@ def topo_order(graph: dict) -> list[str]:
 def sync_path(graph: dict, entry: str) -> set[str]:
     """The entry service plus everything it calls while answering a request (dataflow edges from the entry)."""
     return {entry} | {e["to"] for e in graph["edges"] if e["from"] == entry and e["kind"] == "dataflow"}
+
+
+def corrections_path(target_dir: Path) -> Path:
+    return target_dir / "chaos-map.json"
+
+
+def load_corrections(target_dir: Path) -> dict:
+    import json
+
+    try:
+        data = json.loads(corrections_path(target_dir).read_text(encoding="utf-8"))
+        return {"add": list(data.get("add", [])), "remove": [tuple(x) for x in data.get("remove", [])]}
+    except (OSError, ValueError):
+        return {"add": [], "remove": []}
+
+
+def save_corrections(target_dir: Path, data: dict) -> None:
+    import json
+
+    corrections_path(target_dir).write_text(json.dumps({"add": data["add"], "remove": [list(x) for x in data["remove"]]},
+                                                       indent=1), encoding="utf-8")
+
+
+def corrected_edges(target_dir: Path, base: list[dict]) -> list[dict]:
+    """Manual corrections (engineer-edited data flows) on top of the adapter's edges."""
+    c = load_corrections(target_dir)
+    gone = set(c["remove"])
+    edges = [e for e in base if (e["from"], e["to"]) not in gone]
+    known = {(e["from"], e["to"]) for e in edges}
+    edges += [{**e, "kind": "dataflow", "label": e.get("label") or "added by hand"} for e in c["add"]
+              if (e["from"], e["to"]) not in known and (e["from"], e["to"]) not in gone]
+    return edges

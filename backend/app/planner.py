@@ -5,6 +5,7 @@ but only from the remaining catalog, and its pick is rejected otherwise.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import re
@@ -12,11 +13,18 @@ import re
 from . import ledger, llm, score
 
 
-def _adapt(exp: dict, results: list[dict], graph: dict) -> tuple[float, str]:
-    """Priority = graph risk, then adjusted by observed behaviour. Returns (priority, reason)."""
+def _adapt(exp: dict, results: list[dict], graph: dict, twin: dict[str, float] | None = None) -> tuple[float, str]:
+    """Priority = graph risk, adjusted by observed behaviour and, when available, the twin's rehearsal.
+    Returns (priority, reason)."""
     node = next((n for n in graph["nodes"] if n["id"] == exp["target"]), None)
     prio = exp["risk_hint"]
     why = []
+    if twin:
+        top = max(twin.values()) or 1.0
+        predicted = twin.get(exp["id"], 0.0)
+        prio = 0.4 * prio + 0.6 * (predicted / top)
+        if predicted > 0:
+            why.append(f"the twin rehearsal predicts penalty {predicted:g}")
     if node:
         bits = []
         if node["spof"]:
@@ -46,14 +54,57 @@ def _adapt(exp: dict, results: list[dict], graph: dict) -> tuple[float, str]:
     return prio, "; ".join(why) or "covers a service not tested yet"
 
 
-def rules_pick(remaining: list[dict], results: list[dict], graph: dict) -> tuple[dict, str]:
-    ranked = sorted(((*_adapt(e, results, graph), e) for e in remaining), key=lambda x: (-x[0], x[2]["id"]))
-    prio, why, exp = ranked[0]
+def rules_rank(remaining: list[dict], results: list[dict], graph: dict,
+               twin: dict[str, float] | None = None) -> list[tuple[float, str, dict]]:
+    return sorted(((*_adapt(e, results, graph, twin), e) for e in remaining), key=lambda x: (-x[0], x[2]["id"]))
+
+
+def rules_pick(remaining: list[dict], results: list[dict], graph: dict,
+               twin: dict[str, float] | None = None) -> tuple[dict, str]:
+    prio, why, exp = rules_rank(remaining, results, graph, twin)[0]
     return exp, why
 
 
-async def pick(remaining: list[dict], results: list[dict], graph: dict) -> dict:
-    exp, why = rules_pick(remaining, results, graph)
+async def rank_all(catalog: list[dict], results: list[dict], graph: dict, twin: dict[str, float] | None = None) -> dict:
+    """The AI's full plan: every experiment ranked, each with a short reason, before anything runs."""
+    ranked = rules_rank(catalog, results, graph, twin)
+    base = [{"experiment_id": e["id"], "rank": i + 1, "priority": round(p, 2), "reason": why}
+            for i, (p, why, e) in enumerate(ranked)]
+    prompt = json.dumps({
+        "experiments": [{"id": e["id"], "type": e["type"], "target": e["target"], "risk": e["risk_hint"],
+                         "twin_penalty": (twin or {}).get(e["id"])} for e in catalog],
+        "graph": [{k: n[k] for k in ("id", "role", "restart", "fan_in", "spof", "stateful")} for n in graph["nodes"]],
+        "measured": [{"id": r["experiment"]["id"], "errors_pct": r["outcome"]["error_pct"], "lost": r["outcome"]["lost"],
+                      "recovery_s": r["outcome"]["recovery_s"]} for r in results[-8:]],
+    }, separators=(",", ":"))
+    system = ("You plan chaos experiments. Rank ALL experiments from most to least informative or risky, using the "
+              "dependency graph, the twin's predicted penalty and what was measured. One short reason each. "
+              'Reply JSON only: {"plan":[{"experiment_id":"...","reason":"..."}]}')
+    ids = [e["id"] for e in catalog]
+    allowed = set(re.findall(r"\d+(?:\.\d+)?", prompt))
+
+    def accept(text: str) -> bool:
+        rows = (llm.extract_json(text) or {}).get("plan")
+        if not isinstance(rows, list) or sorted(r.get("experiment_id") for r in rows if isinstance(r, dict)) != sorted(ids):
+            return False
+        said = " ".join(str(r.get("reason", "")) for r in rows)
+        return all(str(r.get("reason", "")).strip() for r in rows) and set(re.findall(r"\d+(?:\.\d+)?", said)) <= allowed
+
+    prio = {row["experiment_id"]: row["priority"] for row in base}
+    try:
+        res = await asyncio.wait_for(llm.complete("rank", prompt, system=system, max_tokens=1400, min_tier="small",
+                                                  accept=accept), 40)
+        rows = (llm.extract_json(res.text) or {})["plan"]
+        plan = [{"experiment_id": r["experiment_id"], "rank": i + 1, "priority": prio[r["experiment_id"]],
+                 "reason": str(r["reason"]).strip()} for i, r in enumerate(rows)]
+        return {"plan": plan, "decided_by": res.source, "model": res.model}
+    except (llm.NoModelAvailable, asyncio.TimeoutError):
+        ledger.record_rule(task="rank", tokens_in=ledger.estimate_tokens(system + prompt), tokens_out=len(base) * 20)
+        return {"plan": base, "decided_by": "rules", "model": "rules engine"}
+
+
+async def pick(remaining: list[dict], results: list[dict], graph: dict, twin: dict[str, float] | None = None) -> dict:
+    exp, why = rules_pick(remaining, results, graph, twin)
     ids = {e["id"] for e in remaining}
     prompt = json.dumps({
         "remaining": [{"id": e["id"], "type": e["type"], "target": e["target"], "risk": e["risk_hint"]} for e in remaining],
@@ -75,12 +126,13 @@ async def pick(remaining: list[dict], results: list[dict], graph: dict) -> dict:
             set(re.findall(r"\d+(?:\.\d+)?", said)) <= allowed
 
     try:
-        res = await llm.complete("plan", prompt, system=system, max_tokens=200, min_tier="small", accept=accept)
+        res = await asyncio.wait_for(llm.complete("plan", prompt, system=system, max_tokens=200, min_tier="small",
+                                                  accept=accept), 15)
         d = llm.extract_json(res.text) or {}
         chosen = next(e for e in remaining if e["id"] == d["experiment_id"])
         return {"experiment": chosen, "reason": str(d["reason"]).strip(), "hypothesis": str(d.get("hypothesis", "")).strip(),
                 "decided_by": res.source, "model": res.model}
-    except llm.NoModelAvailable:
+    except (llm.NoModelAvailable, asyncio.TimeoutError):
         ledger.record_rule(task="plan", tokens_in=ledger.estimate_tokens(system + prompt), tokens_out=40)
         return {"experiment": exp, "reason": why, "hypothesis": exp["description"], "decided_by": "rules",
                 "model": "rules engine"}

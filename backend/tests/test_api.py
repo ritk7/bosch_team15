@@ -10,7 +10,7 @@ from app.runner import SimRunner
 from app.sim import Clock
 
 STATE_KEYS = {"target", "runner", "services", "baseline", "phase", "busy", "current", "results", "campaign", "analysis", "fixes",
-              "applied_fixes", "score_history", "twin", "compare", "cost", "error"}
+              "applied_fixes", "score_history", "twin", "plan", "compare", "cost", "error"}
 NODE_KEYS = {"id", "role", "image", "ports", "healthcheck", "restart", "stateful", "replicas", "depends_on", "fan_in",
              "spof", "notes"}
 OUTCOME_KEYS = {"sent", "acked", "stored", "lost", "errors", "error_pct", "p95_ms", "peak_p95_ms", "recovery_s",
@@ -58,3 +58,7 @@ def test_contract_shapes_and_a_full_run(tmp_path, monkeypatch):
 
         assert client.post("/api/killswitch").json() == {"ok": True, "restored": []}
         assert client.get("/api/snapshot").json()["results"]
+        pl = client.post("/api/plan").json()
+        assert len(pl["plan"]) == len(cat) and all(r["reason"] for r in pl["plan"])
+        sc = client.post("/api/analyze").json()["score"]
+        assert {"service", "value", "experiments", "worst"} <= set(sc["services"][0])

@@ -62,4 +62,21 @@ def compute(results: list[dict], graph: dict) -> dict:
     if harmless:
         breakdown.append({"name": f"{harmless} experiments without measurable harm", "points": 0, "max": 0,
                           "note": "they do not raise the score"})
-    return {"value": round(max(0.0, min(100.0, 100 - total)), 1), "breakdown": breakdown}
+    return {"value": round(max(0.0, min(100.0, 100 - total)), 1), "breakdown": breakdown,
+            "services": per_service(results, graph)}
+
+
+def per_service(results: list[dict], graph: dict) -> list[dict]:
+    """Ranked resilience per service (weakest first): the same formula, restricted to experiments on that service."""
+    fan = {n["id"]: n["fan_in"] for n in graph["nodes"]}
+    out = []
+    for n in graph["nodes"]:
+        rows = sorted(((penalty(r, fan.get(n["id"], 0))[0], r) for r in latest(results)
+                       if r["experiment"]["target"] == n["id"]), key=lambda x: -x[0])
+        if not rows:
+            out.append({"service": n["id"], "value": None, "experiments": 0, "worst": None})
+            continue
+        total = rows[0][0] + OTHERS * sum(p for p, _ in rows[1:])
+        out.append({"service": n["id"], "value": round(max(0.0, 100 - total), 1), "experiments": len(rows),
+                    "worst": rows[0][1]["experiment"]["title"] if rows[0][0] > 0 else None})
+    return sorted(out, key=lambda x: (x["value"] is None, x["value"] if x["value"] is not None else 0, x["service"]))

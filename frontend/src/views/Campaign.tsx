@@ -65,6 +65,36 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
       </div>
       {error && <p role="alert" className="border-l-2 border-crit pl-3 text-crit">{error}</p>}
 
+      <section aria-labelledby="plan-h" className="border border-rule bg-surface p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 id="plan-h" className="wd-wide text-base font-semibold">AI ranked plan</h2>
+          <button type="button" disabled={running} onClick={() => act(() => api.plan())}
+            className="border border-cobalt px-3 py-1.5 text-sm font-semibold text-cobalt hover:bg-cobalt-soft disabled:opacity-50">
+            {state.plan ? "Rank again" : "Rank every experiment"}
+          </button>
+        </div>
+        <p className="mt-1 text-[0.8rem] text-graphite">
+          Every experiment, most informative or risky first, with a reason, from the dependency map, the twin rehearsal and what was measured.
+          {state.plan && ` Decided by ${SOURCE_LABEL[state.plan.decided_by] ?? state.plan.decided_by}${state.plan.decided_by !== "rules" ? ` (${state.plan.model})` : ""}.`}
+        </p>
+        {state.plan && (
+          <ol className="mt-3 max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
+            {state.plan.plan.map((r) => (
+              <li key={r.experiment_id} className="grid grid-cols-[2rem_minmax(0,1fr)_4rem] items-baseline gap-2 border-t border-rule pt-1.5 text-sm">
+                <span className="wd-wide font-semibold text-graphite tabular-nums">{r.rank}</span>
+                <span>
+                  <span className="font-semibold">{byId.get(r.experiment_id)?.title ?? r.experiment_id}</span>
+                  <span className="block text-[0.8rem] text-graphite">{r.reason}</span>
+                </span>
+                <span className="relative mt-1.5 h-1.5 bg-rule" title={`priority ${r.priority}`}>
+                  <span className="absolute inset-y-0 left-0 bg-cobalt" style={{ width: `${Math.min(100, r.priority * 100)}%` }} />
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
       {state.compare && (
         <section aria-labelledby="cmp-h" className="border border-rule bg-surface p-4">
           <h2 id="cmp-h" className="wd-wide text-base font-semibold">AI planner against random order</h2>

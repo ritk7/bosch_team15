@@ -126,7 +126,7 @@ export default function App() {
             The backend isn't reachable on port 8000. Start it with <code>python dev.py</code>.
           </p>
         )}
-        {tab === "live" && state && target && <Live state={state} target={target} catalog={catalog} onChange={poll} />}
+        {tab === "live" && state && target && <Live state={state} target={target} catalog={catalog} onChange={poll} onTargetChange={loadTarget} />}
         {tab === "findings" && state && target && <Findings state={state} target={target} onChange={poll} />}
         {tab === "campaign" && state && target && <Campaign state={state} target={target} catalog={catalog} onChange={poll} />}
         {tab === "report" && state && <Report version={`${state.results.length}-${state.analysis?.score.value ?? ""}-${target?.name}`} />}

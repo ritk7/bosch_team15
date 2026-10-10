@@ -73,7 +73,7 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
             <h2 id="f-h" className="wd-wide text-base font-semibold">
               {a.findings.length} {a.findings.length === 1 ? "weakness" : "weaknesses"} found
               <span className="ml-2 text-sm font-normal text-graphite">
-                written by {SOURCE_LABEL[a.decided_by] ?? a.decided_by}{a.decided_by !== "rules" ? ` (${a.model})` : ""}, evidence from measurements
+                {a.decided_by === "rules" ? "updated live after every run (rules); press Analyse with AI for the AI write-up" : `written by ${SOURCE_LABEL[a.decided_by] ?? a.decided_by} (${a.model})`}, evidence from measurements
               </span>
             </h2>
             {a.findings.length === 0 && <p className="text-graphite">No experiment caused measurable harm.</p>}
@@ -110,6 +110,24 @@ export function Findings({ state, target, onChange }: { state: State; target: Ta
                   <span className="font-semibold tabular-nums text-ok">{Math.round(after.value)}</span>{" "}
                   ({after.value >= before.value ? "+" : ""}{Math.round(after.value - before.value)} points, measured on a re-run)
                 </p>
+              )}
+              {a.score.services && a.score.services.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-[0.8rem] font-semibold">Services ranked by resilience, weakest first</h3>
+                  <ul className="mt-2 space-y-1.5">
+                    {a.score.services.map((s) => (
+                      <li key={s.service} className="grid grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-center gap-2 text-[0.8rem]">
+                        <span className="wd-wide font-semibold">{s.service}</span>
+                        <span className="relative h-2 bg-rule" title={s.worst ? `worst: ${s.worst}` : ""}>
+                          {s.value != null && (
+                            <span className={`absolute inset-y-0 left-0 ${s.value < 50 ? "bg-crit" : s.value < 80 ? "bg-warn" : "bg-ok"}`} style={{ width: `${s.value}%` }} />
+                          )}
+                        </span>
+                        <span className="text-right tabular-nums">{s.value == null ? "untested" : Math.round(s.value)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               <table className="mt-4 w-full border-collapse text-[0.8rem]">
                 <tbody className="tabular-nums">

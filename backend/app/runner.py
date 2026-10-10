@@ -151,6 +151,17 @@ class SimRunner:
             self.app.stop(name)
         return "Simulation stopped: all services down"
 
+    async def load(self, svc: str, workers: int):
+        """Simulated query flood: the database answers much slower while it lasts."""
+        self._check(svc)
+        normal = self.app.svcs[svc].cpus
+        self.app.set_cpus(svc, 0.08)
+
+        async def stop() -> None:
+            self.app.set_cpus(svc, normal)
+
+        return stop
+
     async def apply_overlay(self, services: list[str], reset: bool = False) -> None:
         """The overlay changed restart policies: give the simulated containers the policies from the merged graph."""
         if reset:

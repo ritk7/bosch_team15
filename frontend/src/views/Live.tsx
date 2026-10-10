@@ -28,9 +28,42 @@ interface Props {
   target: Target;
   catalog: Experiment[];
   onChange: () => void;
+  onTargetChange: () => void;
 }
 
-export function Live({ state, target, catalog, onChange }: Props) {
+function MapEditor({ target, disabled, onChange }: { target: Target; disabled: boolean; onChange: () => void }) {
+  const ids = target.graph.nodes.map((n) => n.id);
+  const [from, setFrom] = useState(ids[0]);
+  const [to, setTo] = useState(ids[1] ?? ids[0]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const exists = target.graph.edges.some((e) => e.kind === "dataflow" && e.from === from && e.to === to);
+  async function edit(action: "add" | "remove") {
+    setMsg(null);
+    try {
+      await api.editEdge(from, to, action);
+      onChange();
+      setMsg(action === "add" ? `Added ${from} → ${to}` : `Removed ${from} → ${to}`);
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : String(err));
+    }
+  }
+  return (
+    <details className="border border-rule bg-surface p-4">
+      <summary className="cursor-pointer text-sm font-semibold">Correct the map by hand</summary>
+      <p className="mt-1 text-[0.8rem] text-graphite">Add a data flow the tool missed, or remove a wrong one. Saved next to the compose file.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <select value={from} onChange={(e) => setFrom(e.target.value)} className="border border-rule bg-surface px-2 py-1">{ids.map((i) => <option key={i}>{i}</option>)}</select>
+        <span aria-hidden="true">→</span>
+        <select value={to} onChange={(e) => setTo(e.target.value)} className="border border-rule bg-surface px-2 py-1">{ids.map((i) => <option key={i}>{i}</option>)}</select>
+        <button type="button" disabled={disabled || exists || from === to} onClick={() => edit("add")} className="border border-cobalt px-2 py-1 text-cobalt disabled:opacity-40">Add flow</button>
+        <button type="button" disabled={disabled || !exists} onClick={() => edit("remove")} className="border border-rule px-2 py-1 text-graphite disabled:opacity-40">Remove flow</button>
+      </div>
+      {msg && <p className="mt-2 text-[0.8rem] text-graphite" role="status">{msg}</p>}
+    </details>
+  );
+}
+
+export function Live({ state, target, catalog, onChange, onTargetChange }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState<Prediction | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -98,6 +131,9 @@ export function Live({ state, target, catalog, onChange }: Props) {
               Baseline: <span className="text-ink">{state.baseline.rps} {unit.plural}/s</span>,{" "}
               <span className="text-ink">{state.baseline.error_pct}% errors</span>, p95{" "}
               <span className="text-ink">{ms(state.baseline.p95_ms)}</span>
+              {state.baseline.total_services != null && (
+                <>, <span className="text-ink">{state.baseline.healthy_services}/{state.baseline.total_services} services healthy</span></>
+              )}
             </>
           ) : (
             "Baseline is measured before the first experiment."
@@ -130,6 +166,8 @@ export function Live({ state, target, catalog, onChange }: Props) {
               }}
             />
           </section>
+
+          <MapEditor target={target} disabled={running} onChange={onTargetChange} />
 
           <section aria-labelledby="choose-h" className="border border-rule bg-surface p-4">
             <h2 id="choose-h" className="wd-wide text-base font-semibold">
