@@ -14,7 +14,7 @@ import yaml
 
 from . import agents, analysis, config, fixes, injectors, ledger, mapper, planner, score, state
 from .guard import Guard, Thresholds
-from .probe import Probe, p95
+from .probe import Probe, p95, steady_check, steady_span
 from .runner import differs
 
 LEAD_IN_S = 1.0  # normal traffic before the fault, so the chart shows the change
@@ -31,7 +31,9 @@ class Engine:
         self.persist = persist  # the twin engine never touches the safety files
         self.target, self.runner = target, runner
         self.clock = runner.clock
-        self.rate = config.PROBE_RATE if rate is None else rate
+        if rate is None:
+            rate = config.PROBE_RATE if config.PROBE_RATE_SET else getattr(target, "probe_rate", config.PROBE_RATE)
+        self.rate = rate
         if not math.isfinite(self.rate) or self.rate <= 0:
             raise ValueError("Probe rate must be a finite positive number")
         self.guard = Guard()  # thresholds set in refresh_graph (blast radius depends on the app's size)
@@ -236,7 +238,7 @@ class Engine:
         probe: Probe | None = None
         restored_at: float | None = None
         try:
-            self.phase = "baseline"
+            self._enter("baseline")
             if self._expected is not None:
                 before = await self.runner.snapshot()
                 changed = [n for n in self.order if n in self._expected and differs(before[n], self._expected[n])]
@@ -257,21 +259,22 @@ class Engine:
             t_begin = self.clock.now()
             self.t0 = t_begin + LEAD_IN_S
             probe.start()
-            self.phase = "baseline"  # when: only inject into a steady app
+            self._enter("baseline")  # when: only inject into a steady app
             await self._watch(probe, until=self.t0, t_begin=t_begin, fault_s=fault_s)
-            steady_by = self.clock.now() + 10.0
+            span = steady_span(self.rate)
+            steady_by = self.clock.now() + max(10.0, 3 * span)
             while True:
-                w = probe.window(self.clock.now(), span=2.0)
-                if w["completed"] >= 5 and w["error_rate"] == 0 and w["p95_ms"] < 1000:
+                w = probe.window(self.clock.now(), span=span)
+                ok, why = steady_check(w, self.rate, (self.baseline or {}).get("p95_ms"))
+                if ok:
                     break
                 if self.clock.now() > steady_by:
-                    raise RuntimeError(f"App not steady before the fault (errors {w['error_rate']:.0%}, "
-                                       f"p95 {w['p95_ms']:.0f} ms); nothing was injected")
+                    raise RuntimeError(f"App not steady before the fault ({why}); nothing was injected")
                 await self._tick(probe, t_begin, fault_s)
                 await self.clock.sleep(0.5)
             self.t0 = self.clock.now()
 
-            self.phase = "inject"
+            self._enter("inject")
             if self.persist:
                 state.save_active_fault({"run_id": run_id, "experiment_id": exp["id"], "original": original, "ts": time.time(),
                                          "target": self.target.name, "runner": self.runner.kind,
@@ -279,10 +282,10 @@ class Engine:
             self.guard.arm(self.baseline["p95_ms"] if self.baseline else None)  # never a fault without the guard
             self._targets = injectors.targets_of(exp)
             self._cleanups = await injectors.apply(self.runner, exp, probe)
-            self.phase = "observe"
+            self._enter("observe")
             await self._watch(probe, until=self.t0 + fault_s, t_begin=t_begin, fault_s=fault_s, guarded=True)
 
-            self.phase = "restore"
+            self._enter("restore")
             await self._run_cleanups()
             await self.runner.restore_all(original, self.order)
             if self.persist:
@@ -291,7 +294,7 @@ class Engine:
             self.current["fault_ended_s"] = round(restored_at - self.t0, 2)
             self.guard.disarm()
 
-            self.phase = "recover"
+            self._enter("recover")
             # The guard's wall limit bounds an armed fault, not observation after verified restoration. Slow
             # health checks must not consume the separate, bounded recovery window and hide actual recovery.
             while self.clock.now() - restored_at < RECOVER_MAX_S:
@@ -300,7 +303,7 @@ class Engine:
                 await self._tick(probe, t_begin, fault_s)
                 await self.clock.sleep(0.5)
 
-            self.phase = "settle"
+            self._enter("settle")
             await probe.stop_sending()
             await probe.drain(6.0)
             end = self.clock.now() + SETTLE_S
@@ -367,6 +370,12 @@ class Engine:
                 await c()
             except Exception:  # a failed cleanup must not stop the restore
                 pass
+
+    def _enter(self, phase: str) -> None:
+        """Move to a phase and remember it, so the UI never shows phases that did not run (e.g. after a refused start)."""
+        self.phase = phase
+        if self.current is not None and phase not in self.current.setdefault("phases", []):
+            self.current["phases"].append(phase)
 
     async def _restore(self, original: dict) -> list[str]:
         restored = await self.runner.restore_all(original, self.order)
@@ -565,9 +574,11 @@ class Engine:
         # the twin measures its own baseline, so the same "healthy baseline before any fault" gate applies to it
         started = time.perf_counter()
         fan = {n["id"]: n["fan_in"] for n in self.graph["nodes"]}
+        self.twin["attempted"], self.twin["failed"] = len(twin.catalog), []
         for exp in twin.catalog:
             r = await twin.run(f"t{secrets.token_hex(2)}", exp, "twin", config.FAULT_S)
-            if not r:
+            if not r:  # never hide a skipped rehearsal: report it with its reason
+                self.twin["failed"].append({"experiment_id": exp["id"], "title": exp["title"], "reason": twin.error})
                 continue
             o = r["outcome"]
             self.twin["rows"].append({"experiment_id": exp["id"], "title": exp["title"], "target": exp["target"],
@@ -575,8 +586,14 @@ class Engine:
                                       "error_pct": o["error_pct"], "lost": o["lost"], "recovery_s": o["recovery_s"],
                                       "guard_tripped": o["guard_tripped"]})
         self.twin["status"] = "done"
+        self.twin["completed"] = len(self.twin["rows"])
         self.twin["seconds"] = round(time.perf_counter() - started, 1)
-        self.compare = planner.compare(twin.results, twin.catalog, self.graph)
+        if self.twin["failed"]:
+            self.compare = {"planner_runs_to_top3": None, "random_runs_to_top3": None,
+                            "note": f"Not computed: only {self.twin['completed']} of {self.twin['attempted']} rehearsals "
+                                    f"completed, so the comparison would be biased."}
+        else:
+            self.compare = planner.compare(twin.results, twin.catalog, self.graph)
         self.save()
         return self.twin
 

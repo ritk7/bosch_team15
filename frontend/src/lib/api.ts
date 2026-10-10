@@ -214,6 +214,7 @@ export interface Counters {
 }
 
 export interface Current {
+  phases?: Phase[]; // phases this run actually entered (a refused start never shows inject as done)
   run_id: string;
   experiment: Experiment;
   prediction: Prediction | null;
@@ -258,7 +259,10 @@ export interface State {
   fixes: null | { fixes: Fix[]; decided_by: Source; model: string };
   applied_fixes: string[];
   score_history: { label: string; value: number; ts: number }[];
-  twin: null | { status: "running" | "done"; rows: TwinRow[]; ran_at: number; seconds?: number };
+  twin: null | {
+    status: "running" | "done"; rows: TwinRow[]; ran_at: number; seconds?: number;
+    attempted?: number; completed?: number; failed?: { experiment_id: string; title: string; reason: string | null }[];
+  };
   plan: null | { plan: PlanRow[]; decided_by: Source; model: string };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;

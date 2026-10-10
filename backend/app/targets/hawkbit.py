@@ -267,6 +267,7 @@ class HawkbitTarget:
     name = "hawkbit"
     title = "Bosch hawkBit update server"
     entry = "hawkbit"
+    probe_rate = 2  # units/s by default; hawkBit's amd64 image under emulation errors at 5/s (measured)
     selftest_experiment = "crash-mysql"
     db_load = {"service": "mysql", "cmd": ["mysql", "-uroot", "-e",
                                            "SET SESSION max_execution_time = 4000; SELECT BENCHMARK(300000000, SHA2('x', 256))"]}

@@ -259,3 +259,70 @@ def test_twin_rehearses_the_whole_catalog():
     e, tw = run(go())
     assert len(tw["rows"]) == len(e.catalog)  # a placeholder baseline once made every rehearsal fail the health gate
     assert e.compare and e.compare["planner_runs_to_top3"] is not None
+
+
+@pytest.mark.parametrize("rate", [1, 2, 5])
+def test_steady_gate_is_rate_aware(rate):
+    from app.probe import steady_check, steady_span
+
+    span = steady_span(rate)
+    healthy = {"completed": int(rate * span) - 1, "error_rate": 0.0, "p95_ms": 120.0}  # one answer still in flight
+    assert steady_check(healthy, rate, 100.0)[0], (rate, healthy)
+    slow_but_healthy = {**healthy, "p95_ms": 900.0}
+    assert steady_check(slow_but_healthy, rate, 386.0)[0]  # hawkBit under emulation
+    assert not steady_check({**healthy, "error_rate": 0.25}, rate, 100.0)[0]
+    assert not steady_check({**healthy, "p95_ms": 5000.0}, rate, 100.0)[0]
+    assert not steady_check({**healthy, "completed": 1}, rate, 100.0)[0]
+
+
+def test_low_probe_rate_runs_an_experiment():
+    async def go():
+        t = targets.load("voting")
+        e = Engine(t, SimRunner(t, Clock(SPEED)), rate=2)
+        return await e.run("tslow", e.experiment("crash-result"), "before", 4.0), e
+
+    r, e = run(go())
+    assert r is not None, e.error  # 2 units/s used to fail the steady gate forever
+
+
+def test_targets_have_their_own_default_rate(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "PROBE_RATE_SET", False)
+    t = targets.load("hawkbit")
+    assert Engine(t, SimRunner(t, Clock(SPEED))).rate == 2
+
+
+def test_refused_start_never_marks_inject_as_reached():
+    async def go():
+        e = make_engine()
+        e.baseline = {"rps": 5, "error_pct": 50.0, "p95_ms": 10, "votes_sent": 10, "votes_stored": 5}
+        r = await e.run("trefused", e.experiment("crash-redis"), "before", 4.0)
+        return r, e
+
+    r, e = run(go())
+    assert r is None and "inject" not in e.current.get("phases", [])
+
+
+def test_twin_reports_failed_rehearsals_and_skips_biased_comparison(monkeypatch):
+    from app import campaign
+
+    real_run = campaign.Engine.run
+    calls = {"n": 0}
+
+    async def flaky(self, run_id, exp, label, fault_s):
+        calls["n"] += 1
+        if self.persist is False and calls["n"] % 3 == 0:
+            self.error = "simulated failure"
+            return None
+        return await real_run(self, run_id, exp, label, fault_s)
+
+    monkeypatch.setattr(campaign.Engine, "run", flaky)
+
+    async def go():
+        e = make_engine()
+        return await e.run_twin(speed=60), e
+
+    tw, e = run(go())
+    assert tw["failed"] and tw["completed"] + len(tw["failed"]) == tw["attempted"]
+    assert e.compare["planner_runs_to_top3"] is None and "Not computed" in e.compare["note"]

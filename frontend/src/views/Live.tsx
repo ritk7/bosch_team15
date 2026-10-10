@@ -147,7 +147,13 @@ export function Live({ state, target, catalog, onChange, connected, onTargetChan
 
       <div className="experiment-bar">
         <span className={`session-indicator ${running ? "is-running" : ""}`}><i />{running ? state.phase : "Ready to explore"}</span>
-        <ol aria-label="Experiment progress" className="lifecycle">{PHASES.map((p, i) => <li key={p.id} aria-current={p.id === state.phase ? "step" : undefined} className={p.id === state.phase ? "current" : cur && i < phaseIndex ? "complete" : ""}><span>{cur && i < phaseIndex ? "✓" : i + 1}</span>{p.label}</li>)}</ol>
+        <ol aria-label="Experiment progress" className="lifecycle">{PHASES.map((p, i) => {
+          // only phases this run really entered get a check mark; a refused start never shows Inject as done
+          const reached = cur?.phases ? cur.phases.includes(p.id) : cur != null && i < phaseIndex;
+          const isCurrent = p.id === state.phase && (p.id !== "done" || reached || !cur?.phases);
+          const done = reached && !isCurrent;
+          return <li key={p.id} aria-current={isCurrent ? "step" : undefined} className={isCurrent ? "current" : done ? "complete" : ""}><span>{done ? "✓" : i + 1}</span>{p.label}</li>;
+        })}</ol>
         <button className="emergency-control" type="button" disabled={busyAction === "kill"} onClick={kill}><Square size={14} aria-hidden="true" />{busyAction === "kill" ? "Restoring…" : "Stop & restore"}</button>
       </div>
 
@@ -236,7 +242,7 @@ export function Live({ state, target, catalog, onChange, connected, onTargetChan
                     className={
                       p.id === state.phase
                         ? "font-semibold text-cobalt underline decoration-2 underline-offset-4"
-                        : cur && i < phaseIndex
+                        : cur && (cur.phases ? cur.phases.includes(p.id) : i < phaseIndex)
                           ? "text-ink"
                           : "text-graphite"
                     }

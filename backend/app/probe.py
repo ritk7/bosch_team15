@@ -171,3 +171,22 @@ class Probe:
     def recovered_since(self, since: float, now: float, need: int = 5) -> bool:
         decided = [u for u in self.units if u.sent >= since and u.decided(now)]
         return len(decided) >= need and all(u.good() for u in decided[-need:])
+
+
+def steady_check(window: dict, rate: float, baseline_p95_ms: float | None) -> tuple[bool, str]:
+    """Is the app steady enough to inject a fault? Rate-aware: at low probe rates the window is longer and fewer
+    samples are required (2 units/s cannot complete 5 in 2 s). Latency is judged against the measured baseline, so a
+    slow-but-healthy app (hawkBit under emulation) is accepted while errors or a real slowdown are not."""
+    need = max(3, math.ceil(rate * steady_span(rate) * 0.6))
+    limit = max(1000.0, 3 * (baseline_p95_ms or 0))
+    if window["completed"] < need:
+        return False, f"only {window['completed']} of {need} needed answers"
+    if window["error_rate"] > 0:
+        return False, f"errors {window['error_rate']:.0%}"
+    if window["p95_ms"] >= limit:
+        return False, f"p95 {window['p95_ms']:.0f} ms over {limit:.0f} ms"
+    return True, "steady"
+
+
+def steady_span(rate: float) -> float:
+    return max(2.0, 5.0 / rate)

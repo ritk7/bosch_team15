@@ -112,9 +112,15 @@ export function Campaign({ state, target, catalog, onChange }: { state: State; t
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="tw-h" className="wd-wide text-base font-semibold">Digital twin rehearsal</h2>
           <span className="text-sm text-graphite">
-            {state.twin?.status === "running" ? `rehearsing… ${rows.length} done` : state.twin ? `${rows.length} experiments in ${state.twin.seconds} s` : "not run yet"}
+            {state.twin?.status === "running" ? `rehearsing… ${rows.length} done` : state.twin ? `${state.twin.completed ?? rows.length} of ${state.twin.attempted ?? rows.length} experiments in ${state.twin.seconds} s` : "not run yet"}
           </span>
         </div>
+        {state.twin?.failed && state.twin.failed.length > 0 && (
+          <div role="alert" className="mt-2 border-l-2 border-warn pl-3 text-[0.8rem] text-warn">
+            {state.twin.failed.length} rehearsals did not complete, so the comparison is not computed:
+            <ul className="mt-1 list-disc pl-5">{state.twin.failed.map((f) => <li key={f.experiment_id}>{f.title}: {f.reason ?? "no result"}</li>)}</ul>
+          </div>
+        )}
         <p className="mt-1 text-[0.8rem] text-graphite">Predicted damage per service and failure type, from the twin (simulation with the same graph and restart policies). Darker = worse.</p>
         <div className="mt-4 overflow-x-auto">
           <table className="border-collapse text-[0.8rem]">

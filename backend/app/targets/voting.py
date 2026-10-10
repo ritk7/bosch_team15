@@ -47,6 +47,7 @@ class VotingTarget:
     name = "voting"
     title = "voting app"
     entry = "vote"  # the probe sends units here
+    probe_rate = 5  # units/s by default; the worker drains ~10/s
     selftest_experiment = "crash-redis"
     db_load = {"service": "db", "cmd": ["psql", "-U", "postgres", "-c",
                                         "SET statement_timeout = 4000; SELECT count(*) FROM generate_series(1, 50000000)"]}

@@ -149,7 +149,7 @@ interface State {
   baseline: { rps: number; error_pct: number; p95_ms: number; healthy_services: number; total_services: number } | null;
   phase: "idle" | "baseline" | "inject" | "observe" | "restore" | "recover" | "settle" | "done";
   busy: boolean;                          // an experiment, re-run, campaign or twin rehearsal is in progress
-  current: null | { run_id: string; experiment: Experiment; prediction: Prediction | null; label: string;
+  current: null | { phases: Phase[] /* entered so far */; run_id: string; experiment: Experiment; prediction: Prediction | null; label: string;
     elapsed_s: number; fault_duration_s: number; timeline: TimelinePoint[]; fleet: VoteState[];
     wall_s?: number | null; // guard clock, including lead-in traffic; separate from elapsed_s since inject
     fault_ended_s?: number | null; // measured seconds since inject; null until restored; absent in legacy snapshots
@@ -165,7 +165,8 @@ interface State {
   score_history: { label: string; value: number; ts: number }[];   // one entry per /analyze, "before fix" / "after fix"
   plan: null | { plan: { experiment_id: string; rank: number; priority: number; reason: string }[]; decided_by: Source; model: string };
   twin: null | { status: "running" | "done"; rows: { experiment_id: string; title: string; target: string; type: FailureType;
-    penalty: number; error_pct: number; lost: number; recovery_s: number | null; guard_tripped: boolean }[]; ran_at: number; seconds?: number };
+    penalty: number; error_pct: number; lost: number; recovery_s: number | null; guard_tripped: boolean }[]; ran_at: number; seconds?: number;
+    attempted: number; completed: number; failed: { experiment_id: string; title: string; reason: string | null }[] };
   compare: null | { planner_runs_to_top3: number | null; random_runs_to_top3: number | null; note: string };
   cost: CostSummary;                      // as in the kit's ledger.summary()
   error: string | null;

@@ -16,7 +16,9 @@ Optional: copy the team's `backend/.env` over privately (AirDrop or USB, never c
 ## Start and verify
 ```bash
 docker compose -p hawkbit -f targets/hawkbit/docker-compose.yml up -d
-# wait until http://localhost:8080 shows the hawkBit login (admin / admin); the first start can take 1-3 minutes
+# wait until hawkBit answers (1-3 minutes). The current image has no web UI: http://localhost:8080 shows the
+# Swagger API page. Check it is ready with:
+curl -s -u admin:admin "http://localhost:8080/rest/v1/targets?limit=1" -o /dev/null -w "HTTP %{http_code}\n"
 python dev.py selftest --target hawkbit
 ```
 The selftest enables device TargetToken authentication, creates a software module and a distribution set, then runs
@@ -25,6 +27,15 @@ feedback "closed/success"), kills MySQL with the guard armed, and prints PASS/FA
 
 If a step fails, copy the whole output: the adapter's API calls live in `backend/app/targets/hawkbit.py`
 (`HawkbitClient`) and are the only part that may need adjusting to the server version.
+
+See the devices our probe updated (the proof that it drove hawkBit's real APIs):
+```bash
+curl -s -u admin:admin "http://localhost:8080/rest/v1/targets?limit=10&sort=createdAt:DESC" | python3 -m json.tool | grep -E "controllerId|updateStatus"
+```
+`in_sync` means the device received the update and reported success.
+
+hawkBit's amd64 image runs under emulation on Apple Silicon and is slower than the voting app, so its default probe
+rate is 2 devices/s (5/s produced 4% errors and 7.7 s p95 on an M4 Pro, measured). `PROBE_RATE` overrides it.
 
 ## Demo
 ```bash
