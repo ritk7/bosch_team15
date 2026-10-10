@@ -146,10 +146,27 @@ class SimRunner:
         return SimClient(self.app, self.clock)
 
 
+def docker_available(target) -> bool:
+    """auto mode: use Docker when the daemon answers and the target's compose project is cloned."""
+    import subprocess
+
+    from .docker_runner import docker_bin
+
+    exe = docker_bin()
+    if not exe or not (target.target_dir / "docker-compose.yml").exists():
+        return False
+    try:
+        return subprocess.run([exe, "info"], capture_output=True, timeout=8).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def make_runner(target) -> Runner:
     kind = config.RUNNER
-    if kind == "docker":
-        raise RuntimeError("RUNNER=docker is built in Milestone 2. Use RUNNER=sim or RUNNER=auto for now.")
-    if kind not in ("sim", "auto"):
+    if kind not in ("sim", "docker", "auto"):
         raise RuntimeError(f"Unknown RUNNER '{kind}'. Use sim, docker or auto.")
+    if kind == "docker" or (kind == "auto" and docker_available(target)):
+        from .docker_runner import DockerRunner
+
+        return DockerRunner(target)
     return SimRunner(target)

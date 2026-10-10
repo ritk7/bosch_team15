@@ -94,7 +94,7 @@ async def predict(exp: dict, graph: dict, *, entry: str, sync: set[str], rate: f
                          "guard": "stops the fault when error rate over 3 s >= 60% or p95 >= 3 s",
                          "baseline": baseline, "past_runs": past}, separators=(",", ":"))
     try:
-        res = await llm.complete("predict", prompt, system=SYSTEM, max_tokens=300, min_tier="local", accept=_accept)
+        res = await llm.complete("predict", prompt, system=SYSTEM, max_tokens=300, min_tier="small", accept=_accept)
         d = llm.extract_json(res.text) or {}
         p = {"expected_error_pct": round(float(d["expected_error_pct"])), "expected_votes_lost": int(d["expected_votes_lost"]),
              "expected_recovery_s": round(float(d["expected_recovery_s"]), 1), "confidence": d["confidence"],

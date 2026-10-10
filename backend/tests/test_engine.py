@@ -76,8 +76,8 @@ def test_crash_redis_trips_guard_and_measures_outcome():
 
     r = run(go())
     o = r["outcome"]
-    assert o["guard_tripped"] and "Error rate" in o["guard_reason"]
-    assert o["errors"] > 0 and 0 < o["error_pct"] < 100
+    assert o["guard_tripped"] and ("p95" in o["guard_reason"] or "Error rate" in o["guard_reason"])
+    assert o["peak_p95_ms"] >= 3000  # measured on Docker: votes hang while Redis is gone
     assert o["recovery_s"] is not None and o["recovery_s"] > 0
     assert r["prediction"] and r["prediction_error"] is not None
     assert set(r["fleet"]) <= {"ok", "queued", "error", "lost", "pending"}
@@ -121,7 +121,7 @@ def test_active_fault_is_restored_on_startup():
         return restored, await e.runner.snapshot(), original
 
     restored, after, original = run(go())
-    assert restored[0] == "redis" and set(restored) <= {"redis", "worker"} and after == original  # worker exits with redis
+    assert restored == ["redis"] and after == original
     assert state.load_active_fault() is None
 
 

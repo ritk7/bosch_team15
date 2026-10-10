@@ -69,6 +69,9 @@ class VotingTarget:
     def overlay_file(self) -> Path:
         return self.target_dir / "docker-compose.fixes.yml"
 
+    def graph_services(self) -> dict[str, dict]:
+        return mapper.load_services(self.compose_file(), self.overlay_file())
+
     def graph(self) -> dict:
         return mapper.build_graph(self.compose_file(), roles=self.roles, extra_edges=self.extra_edges,
                                   notes=self.notes, overlay=self.overlay_file())

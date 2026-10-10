@@ -22,9 +22,9 @@ export function FleetGrid({ fleet, unit }: { fleet: VoteState[]; unit: Unit }) {
     { s: "pending", label: "no answer yet" },
   ];
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+    <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start">
       <div
-        className="grid w-full max-w-[300px] shrink-0 grid-cols-10 gap-[3px]"
+        className="grid w-full max-w-[320px] shrink-0 grid-cols-10 gap-[3px]"
         role="img"
         aria-label={`Last ${fleet.length} ${unit.plural}: ${legend.map((l) => `${count(l.s)} ${l.label}`).join(", ")}`}
       >
@@ -32,7 +32,7 @@ export function FleetGrid({ fleet, unit }: { fleet: VoteState[]; unit: Unit }) {
           <div key={i} className={`aspect-square rounded-[2px] ${CELL[c]} transition-colors duration-300`} />
         ))}
       </div>
-      <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[0.8rem] text-graphite sm:grid-cols-1">
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[0.8rem] text-graphite sm:grid-cols-3 2xl:grid-cols-1">
         {legend.map((l) => (
           <li key={l.s} className="flex items-center gap-2">
             <span aria-hidden="true" className={`inline-block h-3 w-3 shrink-0 rounded-[2px] ${CELL[l.s]}`} />

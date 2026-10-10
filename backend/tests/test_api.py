@@ -5,7 +5,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from app import main, state
+from app import config, main, state
 from app.runner import SimRunner
 from app.sim import Clock
 
@@ -22,6 +22,7 @@ PREDICTION_KEYS = {"experiment_id", "summary", "expected_error_pct", "expected_v
 def test_contract_shapes_and_a_full_run(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "ACTIVE_FAULT", tmp_path / "a.json")
     monkeypatch.setattr(state, "LAST_STATE", tmp_path / "l.json")
+    monkeypatch.setattr(config, "RUNNER", "sim")  # never touch a real Docker project from the tests
     with TestClient(main.app) as client:
         main.engine.runner = SimRunner(main.engine.target, Clock(40))  # fast simulated time
         main.engine.clock = main.engine.runner.clock

@@ -8,7 +8,9 @@ Behaviour comes from the app's source code (github.com/dockersamples/example-vot
   Postgres, but exits if the name "redis" does not resolve.
 - docker-compose.yml: no restart policy, so an exited container stays down. Postgres keeps data in a named volume;
   Redis keeps the queue in memory only.
-These are hypotheses about the real stack until `python dev.py selftest` measures them on Docker.
+Measured on Docker (selftest, 2026-10-10), and the simulation follows the measurement where it differs from the source:
+- crash redis: vote requests hang (no fast 500; the name "redis" stops resolving), so p95 trips the guard after ~4 s;
+  the worker did not exit, it reconnected once Redis was back. Other behaviour above is still unverified.
 """
 from __future__ import annotations
 
@@ -144,8 +146,9 @@ class SimVoting:
                 return
             self._worker_ready = True
         redis = self.reach("redis", t)
-        if redis == "down":
-            return self._exit("worker", t)
+        if redis == "down":  # measured: the worker survives a Redis crash and reconnects
+            self._worker_next = t + 1.0
+            return
         if redis == "paused":
             self._redis_hang = self._redis_hang if self._redis_hang is not None else t
             if t - self._redis_hang >= REDIS_TIMEOUT_S:
@@ -183,10 +186,10 @@ class SimVoting:
             return "wait", None, 0.0
         base = (0.006 + self.rng.random() * 0.006) * self._slow("vote")
         r = self.reach("redis", t)
-        if r == "down":
-            return "done", 500, base
-        if r == "paused":
-            return "wait", None, 0.0
+        if r == "down" and not self.svcs["redis"].connected:
+            return "done", 500, base  # name resolves to nothing reachable: fails fast
+        if r in ("down", "paused"):
+            return "wait", None, 0.0  # measured: requests hang while Redis is gone, then 500 after vote's 5 s timeout
         self.queue.append((voter_id, vote))
         return "done", 200, base
 
