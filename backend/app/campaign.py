@@ -47,6 +47,7 @@ class Engine:
         self._services: list[dict] = []
         self._cleanups: list = []
         self._targets: set[str] = set()
+        self.restored_from: float | None = None
         self._expected: dict | None = None  # service states at the first run: the healthy app
         self.analysis: dict | None = None
         self.fixes: dict | None = None
@@ -114,6 +115,8 @@ class Engine:
         """After a restart of the tool, bring back runs, findings and score (same target and runner only)."""
         if not snap or snap.get("target") != self.target.name or (snap.get("runner") or {}).get("kind") != self.runner.kind:
             return False
+        # never pass old runs off as live: the UI shows when they were saved until the demo is reset or a new run starts
+        self.restored_from = snap.get("saved_at") or (snap.get("results") or [{}])[-1].get("started_at")
         self.results = snap.get("results") or []
         self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
         self.applied_fixes = snap.get("applied_fixes") or []
@@ -214,6 +217,7 @@ class Engine:
         if self.persist and state.load_active_fault():
             raise Busy("A previous fault needs restoration; press the kill switch first")
         exp = self.experiment(exp_id)
+        self.restored_from = None
         run_id = f"r{secrets.token_hex(3)}"
         self.error = None
         if not fault_s:  # how safely: the planner's window, else shorter for riskier experiments
@@ -602,6 +606,7 @@ class Engine:
         self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
         self.compare, self.twin, self.plan = None, None, None
         self.baseline, self._expected = None, None
+        self.restored_from = None
         self.guard = Guard(self.guard.base)
         self.save()
         return "Fixes removed and runs cleared"
@@ -638,6 +643,8 @@ class Engine:
             cur = {**self.current, "guard": self.guard.view(seconds_left)}
         return {
             "target": self.target.name,
+            "saved_at": time.time(),
+            "restored_from": self.restored_from,
             "runner": {"kind": self.runner.kind, "ready": ready, "detail": detail},
             "services": self._services,
             "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms", "healthy_services", "total_services")

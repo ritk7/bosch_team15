@@ -237,6 +237,8 @@ export interface Baseline {
 }
 
 export interface State {
+  saved_at?: number;
+  restored_from?: number | null; // set when runs were reloaded from an earlier session (after a restart)
   target: string;
   runner: { kind: RunnerKind; ready: boolean; detail: string };
   services: ServiceStatus[];

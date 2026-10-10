@@ -108,7 +108,7 @@
   <rect x="1050" y="540" width="490" height="150" rx="10" class="code"/>
   <text x="1070" y="576" class="t">10 · Apply and re-run: the proof</text>
   <text x="1070" y="604" class="s">override file → same experiments re-run →</text>
-  <text x="1070" y="624" class="s">score before / after (real Docker: 57 → 74)</text>
+  <text x="1070" y="624" class="s">score before / after (measured on real Docker, 10 Oct: 57 → 74)</text>
   <text x="1070" y="652" class="s">report · architecture page · cost ledger ·</text>
   <text x="1070" y="672" class="s">CI gate: gate --min-score 80</text>
 

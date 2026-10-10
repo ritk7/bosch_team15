@@ -165,6 +165,12 @@ export default function App() {
         </div>
       </header>
       <main id="workspace" tabIndex={-1} className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 sm:py-8">
+        {state?.restored_from && (
+          <p role="status" className="connection-warning">
+            Showing runs saved at {new Date(state.restored_from * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}, before a restart.
+            Run an experiment or press Reset demo on the Findings tab to start fresh.
+          </p>
+        )}
         {offline && state && <p role="alert" className="connection-warning">Connection lost. Displaying the last received state; live values may be stale.</p>}
         {offline && !state && (
           <p role="alert" className="border-l-2 border-crit pl-3 text-crit">
