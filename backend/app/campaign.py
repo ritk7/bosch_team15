@@ -77,6 +77,38 @@ class Engine:
         self.error = f"Restored after an interrupted run ({fault.get('experiment_id')}): {', '.join(restored) or 'nothing to do'}"
         return restored
 
+    def load_snapshot(self, snap: dict | None) -> bool:
+        """After a restart of the tool, bring back runs, findings and score (same target and runner only)."""
+        if not snap or snap.get("target") != self.target.name or (snap.get("runner") or {}).get("kind") != self.runner.kind:
+            return False
+        self.results = snap.get("results") or []
+        self.analysis, self.fixes = snap.get("analysis"), snap.get("fixes")
+        self.applied_fixes = snap.get("applied_fixes") or []
+        self.score_history = snap.get("score_history") or []
+        self.compare, self.twin = snap.get("compare"), snap.get("twin")
+        camp = snap.get("campaign") or {}
+        if camp.get("status") == "running":
+            camp["status"] = "stopped"
+        self.campaign = camp or self.campaign
+        if snap.get("baseline"):
+            self.baseline = {**snap["baseline"], "votes_sent": 0, "votes_stored": 0}
+        if self.results:
+            last = self.results[-1]
+            self.current = {"run_id": last["run_id"], "experiment": last["experiment"], "prediction": last["prediction"],
+                            "label": last["label"], "elapsed_s": last["timeline"][-1]["t"] if last["timeline"] else 0,
+                            "fault_duration_s": config.FAULT_S, "timeline": last["timeline"], "fleet": last["fleet"],
+                            "counters": {k: last["outcome"][k] for k in ("sent", "acked", "stored", "lost", "errors")}}
+            self.phase = "done"
+        return True
+
+    def save(self) -> None:
+        """Snapshot after analysis/fix changes too, not only after runs."""
+        if self.persist:
+            asyncio.get_event_loop().create_task(self._save())
+
+    async def _save(self) -> None:
+        state.save_snapshot(await self.state_json())
+
     # ---- baseline ------------------------------------------------------------------------------------------
     async def measure_baseline(self, duration_s: float = 5.0) -> dict:
         await self.target.prepare(self.runner)
@@ -296,6 +328,7 @@ class Engine:
         self.analysis = {"findings": found, "score": sc, "decided_by": source, "model": model}
         label = "after fix" if self.applied_fixes else "before fix"
         self.score_history.append({"label": label, "value": sc["value"], "ts": time.time()})
+        self.save()
         return self.analysis
 
     async def recommend(self) -> dict:
@@ -304,6 +337,7 @@ class Engine:
         assert self.analysis is not None
         fx, source, model = await analysis.recommend(self.analysis["findings"], self.results, self.graph)
         self.fixes = {"fixes": fx, "decided_by": source, "model": model}
+        self.save()
         return self.fixes
 
     async def apply_fixes(self, fix_ids: list[str]) -> dict:
@@ -321,6 +355,7 @@ class Engine:
         self.refresh_graph()
         await self.runner.apply_overlay(sorted(restart))
         self.applied_fixes = sorted(set(self.applied_fixes) | {x["id"] for x in chosen})
+        self.save()
         return {"ok": True, "overlay": overlay,
                 "detail": f"restart: unless-stopped on {', '.join(sorted(restart))}; re-run the experiments to prove it"}
 
@@ -409,6 +444,7 @@ class Engine:
         self.twin["status"] = "done"
         self.twin["seconds"] = round(time.perf_counter() - started, 1)
         self.compare = planner.compare(twin.results, twin.catalog, self.graph)
+        self.save()
         return self.twin
 
     def start_twin(self) -> None:
@@ -427,6 +463,7 @@ class Engine:
         self.score_history, self.current, self.phase, self.error = [], None, "idle", None
         self.campaign = {"status": "idle", "strategy": "ai", "budget": 0, "picks": [], "remaining": []}
         self.compare, self.twin = None, None
+        self.save()
         return "Fixes removed and runs cleared"
 
     # ---- kill switch ---------------------------------------------------------------------------------------
@@ -454,6 +491,7 @@ class Engine:
                 seconds_left = self.current["fault_duration_s"] - self.current["elapsed_s"]
             cur = {**self.current, "guard": self.guard.view(seconds_left)}
         return {
+            "target": self.target.name,
             "runner": {"kind": self.runner.kind, "ready": ready, "detail": detail},
             "services": self._services,
             "baseline": {k: self.baseline[k] for k in ("rps", "error_pct", "p95_ms")} if self.baseline else None,

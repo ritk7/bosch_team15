@@ -22,6 +22,7 @@ async def lifespan(_app: FastAPI):
     target = targets.load()
     engine = Engine(target, make_runner(target))
     await engine.recover_on_startup()  # undo a fault left behind by a crash of this process
+    engine.load_snapshot(state.load_snapshot(target.name))  # keep the demo's runs and findings across a restart
     yield
     if engine.busy:
         await engine.killswitch()
@@ -84,6 +85,7 @@ async def select_target(body: dict = Body(...)) -> dict:
         raise HTTPException(404, f"Unknown target '{name}'")
     target = targets.load(name)
     engine = Engine(target, make_runner(target))
+    engine.load_snapshot(state.load_snapshot(target.name))
     return {"ok": True, "detail": f"Now testing the {target.title} ({engine.runner.kind})"}
 
 
@@ -231,7 +233,7 @@ def architecture_md() -> PlainTextResponse:
 
 @app.get("/api/snapshot")
 async def snapshot() -> dict:
-    return state.load_snapshot() or await eng().state_json()
+    return state.load_snapshot(eng().target.name) or await eng().state_json()
 
 
 @app.get("/api/ledger")
