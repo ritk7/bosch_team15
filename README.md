@@ -8,6 +8,8 @@ Bosch AI hackathon 2026 · Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali N
 Targets: Docker's open-source [example-voting-app](https://github.com/dockersamples/example-voting-app) (5 services) and
 Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-air update server (monolith + MySQL + RabbitMQ).
 
+**Architecture and workflow:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagram, one-experiment workflow, AI agents, safety, requirement coverage).
+
 ## What it does
 
     map ──► rehearse on a digital twin ──► plan (AI, with reasons) ──► predict ──► inject behind the guard
@@ -102,7 +104,7 @@ last 100 units, experiment library, run history), **Pipeline** (the system as a 
 `backend/app`: `mapper.py` (graph), `probe.py` (units by id), `guard.py` (kill switch), `injectors.py` (failures),
 `campaign.py` (engine), `planner.py`, `analysis.py`, `score.py`, `fixes.py`, `report.py`, `cli.py`, `runner.py` and
 `docker_runner.py` (sim and Docker), `targets/` (voting, hawkBit adapters and twins). `frontend/src`: Live, Campaign,
-Findings, Report, Cost views. Docs: [architecture](docs/CONTRACT.md), [timeline](docs/TIMELINE.md), [demo](docs/DEMO.md).
+Findings, Report, Cost views. Docs: [architecture and workflow](docs/ARCHITECTURE.md), [API contract](docs/CONTRACT.md), [timeline](docs/TIMELINE.md), [demo](docs/DEMO.md).
 
 ## Safety notes (stated up front)
 - Two short-lived helper containers act on **one container of our own project at a time**: `alpine` with `--pid=host`

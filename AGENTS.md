@@ -151,7 +151,7 @@ These are our best "engineering maturity" stories: we trusted measurements over 
 | Fix proof (real Docker) | resilience score 57 → 74 after `restart: unless-stopped` on redis + worker |
 | Digital twin | 15 experiments in ~7 s (voting), 11 in ~3 s (hawkBit) |
 | AI planner vs random (twin) | voting: 3–7 runs vs ~12 to find the top 3 weaknesses; hawkBit: about equal (9 vs 9.1). Say this honestly |
-| Automated tests | 19 passing (guard trips, every experiment restores, kill switch, startup restore, scope, API contract) |
+| Automated tests | 135 backend tests + 33 end-to-end system checks (guard trips, every experiment restores, kill switch, startup restore, scope, API contract) |
 
 ## 9. Timeline (Saturday 10 Oct 2026)
 
