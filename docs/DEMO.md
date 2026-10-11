@@ -38,9 +38,9 @@ cost and ROI from the ledger -> what is next: CI gate, more targets, Kubernetes.
 ## Mapping to what Bosch asked for
 | Bosch asks | Where we show it |
 |---|---|
-| Map services, dependencies, data flows | Live view map, `/api/target`, architecture overview |
+| Map services, dependencies, data flows | Live tab map, Pipeline tab, `/api/target`, architecture overview |
 | Baseline monitoring | `/api/baseline`, optional Prometheus overlay |
-| One safe failure with a kill switch | Live view guard card and Kill button, guard tests |
+| One safe failure with a kill switch | Live tab guard and Stop & restore button, Pipeline tab guard stage, guard tests |
 | Intelligent experiment planning with reasons | Campaign view picks with reason and hypothesis, AI vs random numbers |
 | 3+ failure types with errors, slowdowns, recovery | catalog in `docs/TARGETS.md`, Outcome numbers |
 | Explain findings, rank by severity, recommend fixes, resilience score | Findings view, `/api/analyze`, `/api/fixes`, `score.py` |
