@@ -80,7 +80,7 @@ Seven properties, each one a scoring story:
 | Score | `score.py` | deterministic resilience score |
 | Fixes | `fixes.py` | writes the approved override file |
 | Report / CI | `report.py`, `cli.py` | markdown deliverables; `gate --min-score 80` |
-| UI | `frontend/src` | Live, Campaign, Findings, Report, Cost tabs |
+| UI | `frontend/src` | Live, Pipeline, Campaign, Findings, Report, Cost tabs |
 
 ### The AI agents (4)
 Each agent is one call to a small model with a strict JSON check, plus a rules fallback that works alone. Every decision is logged in the cost ledger.
@@ -229,10 +229,11 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 2. redis → **Pause worker, then crash redis**. The AI prediction appears. "It commits to numbers first." Judge enters a guess.
 3. **Confirm and inject**: worker frozen, redis dies, red units pile up, blast-radius outlines, amber grid.
 4. The guard trips and restores. Reveal: predicted vs measured vs the judge. "Every vote got 200 OK. About 25 vanished."
-5. Findings → Analyse → ranked weaknesses and score → approve the restart fix → Re-run → score rises.
-6. Campaign → Rehearse on the twin: heatmap in seconds; AI vs random.
-7. Switch the target to **Bosch hawkBit**: same tool, Bosch's own OTA server.
-8. Close on cost: read the rupee figure from the Cost tab.
+5. Pipeline tab: "Here is every stage that just ran: three AI agents, plain-code safety, the engineer approves." Wires show the flow.
+6. Findings → Analyse → ranked weaknesses and score → approve the restart fix → Re-run → score rises.
+7. Campaign → Rehearse on the twin: heatmap in seconds; AI vs random.
+8. Switch the target to **Bosch hawkBit**: same tool, Bosch's own OTA server.
+9. Close on cost: read the rupee figure from the Cost tab.
 
 ## 13. Slide deck outline (8–10 slides)
 1. **Title**: Chaos Sentinel. "Break it on purpose. Prove what broke. Prove the fix."

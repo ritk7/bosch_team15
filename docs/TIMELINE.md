@@ -35,6 +35,7 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 | evening | Closed the audit gaps: AI ranked plan, per-service resilience ranking, network delay and packet loss (tc netem), real DB overload, traffic spike while a service is down, collateral-only blast radius, baseline-relative latency limit, fault window by risk with injection only into a steady app, manual map correction, health in the baseline, live findings, twin-guided planning, ledger across restarts, time-boxed AI calls, stage mode, `setup.sh`, architecture diagram | commits `Quick fixes`, `Features`, `Network delay and packet loss` |
 | evening | Verified on real Docker: latency, packet loss, DB overload, CPU throttle, traffic spike, spike while the worker is down. Found and fixed `docker update --cpus 0` silently keeping a CPU limit | commit `Fix: CPU limits` |
 | evening | Full real-Docker session for the sample findings report: twin, ranked plan, 5-pick AI campaign, AI analysis, fix approved, re-run: score 0 → 35 (`docs/sample-findings-report-voting.md`) | |
+| Sun 11 Oct | Stress-tested the UI and fixed lag (Docker status cached in the background, `/api/state` in about 1 ms). Redesigned the UI: Live command deck (labelled phase track, compact map that keeps faulted services outlined, run history), new **Pipeline** tab (the 12 stages as a live wiring diagram), coverage note on Findings; checked at 1440 px and 390 px | commit `Redesign the UI` |
 
 ## Day 2: Sunday (plan)
 
