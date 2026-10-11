@@ -36,6 +36,7 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 | evening | Verified on real Docker: latency, packet loss, DB overload, CPU throttle, traffic spike, spike while the worker is down. Found and fixed `docker update --cpus 0` silently keeping a CPU limit | commit `Fix: CPU limits` |
 | evening | Full real-Docker session for the sample findings report: twin, ranked plan, 5-pick AI campaign, AI analysis, fix approved, re-run: score 0 → 35 (`docs/sample-findings-report-voting.md`) | |
 | Sun 11 Oct | Stress-tested the UI and fixed lag (Docker status cached in the background, `/api/state` in about 1 ms). Redesigned the UI: Live command deck (labelled phase track, compact map that keeps faulted services outlined, run history), new **Pipeline** tab (the 12 stages as a live wiring diagram), coverage note on Findings; checked at 1440 px and 390 px | commit `Redesign the UI` |
+| Sun 11 Oct | **Final real-hawkBit validation** on the latest build (Tejas): selftest 6/6 PASS; crash, slow, freeze MySQL and RabbitMQ cut + MySQL crash: every device updated, recovery 1–8 s; +500 ms on MySQL pushed p95 to 7–8 s and the guard tripped. The 10 Oct wedge did not reproduce. Fixed the report footer to print the live guard limits | `docs/evidence/hawkbit-2026-10-11` |
 
 ## Day 2: Sunday (plan)
 

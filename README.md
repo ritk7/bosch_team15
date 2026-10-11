@@ -29,11 +29,17 @@ and proven on an 8 GB laptop before pointing the same tool at hawkBit.
 | Observability tool | Prometheus + Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map |
 | Low cost | Rules first, small model second (Claude Haiku via an OpenAI-compatible router), response cache, cost ledger. Works with no model at all |
 
-**Headline finding on Bosch's hawkBit** (real server, 718 devices driven through its real APIs): after +500 ms of latency
-on MySQL, 96% of device updates failed and **hawkBit's API never recovered by itself**, while all three containers still
-showed "running". The same happened after one of two MySQL crashes. A Docker health check calls this healthy. Chaos
-Sentinel detects it by checking every device's update status by id, restarts the wedged server and reports it. Fix:
-database connection validation and pool eviction, plus a health check that exercises the database.
+**Findings on Bosch's real hawkBit** (24 GB M4 Pro, devices driven through hawkBit's real management and device APIs;
+evidence in [`docs/evidence/hawkbit-2026-10-11`](docs/evidence/hawkbit-2026-10-11)):
+- **Updates are durable:** in 5 real runs on the latest build (crash, freeze and slow MySQL, RabbitMQ cut + MySQL crash)
+  every device ended `in_sync`: 0 stuck, recovery 1–8 s.
+- **hawkBit is latency-fragile:** +500 ms on MySQL pushed device-update p95 from 0.56 s to 7–8 s (about 13×) and the guard
+  had to stop the fault; freezing MySQL did the same (6.1 s).
+- **Intermittent wedge:** in an earlier session (10 Oct) the same faults left hawkBit's API dead until restarted in 2 of 4
+  runs while every container said "running" (96% of updates failed in the latency run). It did not reproduce on 11 Oct.
+  Chaos Sentinel checks that the app answers, not just that containers run, and restarts and reports a wedged server.
+- Recommended: database connection validation and pool eviction, query timeouts / fail fast, and a health check that
+  exercises the database.
 
 Blueprint check on the voting app (real Docker): pause the worker, then crash Redis: 225 votes got HTTP 200, 23 never
 reached the database.
@@ -96,7 +102,7 @@ on every invocation and append to saved run history.
 2. Header: switch the target to **Bosch hawkBit update server**: 3 services mapped; units become devices getting an update.
 3. Click **mysql** → **Slow network on mysql (+500 ms)**. The AI prediction appears; optionally type your own guess.
 4. **Confirm and inject**: watch the devices (updated or stuck), the guard watches and restores; the reveal shows predicted vs measured.
-   On the real server this left hawkBit's API dead until restarted (96% of updates failed); the tool restarts and reports it.
+   On the real server device-update latency went from 0.56 s to about 8 s and the guard stopped it; no device was lost.
 5. Pipeline tab: the 12 stages (mapper, twin, planner, prediction, injector, guard, probe, restore, risk, score, fix, approve)
    as a live wiring diagram; each stage shows its real latest output, the running stage pulses, the wire is cut when the guard trips.
 6. Findings tab: **Analyse runs** → ranked weaknesses and score → tick a fix → **Approve and apply** → **Re-run**.

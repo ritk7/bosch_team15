@@ -1,0 +1,108 @@
+{
+  "plan": [
+    {
+      "experiment_id": "crash-mysql",
+      "rank": 1,
+      "priority": -0.37,
+      "reason": "High twin penalty (16.5) with measured errors (1.4%) and fast recovery (1.0s) on SPOF component reveals realistic failure mode"
+    },
+    {
+      "experiment_id": "compound-mysql-hang-traffic-spike",
+      "rank": 2,
+      "priority": 0.34,
+      "reason": "Highest twin penalty (60.0) tests interaction effects; measured data shows 5s recovery under compound stress"
+    },
+    {
+      "experiment_id": "hang-mysql",
+      "rank": 3,
+      "priority": 0.02,
+      "reason": "High twin penalty (60.0) on SPOF; measured 5s recovery distinguishes hang behavior from crash"
+    },
+    {
+      "experiment_id": "network-cut-mysql",
+      "rank": 4,
+      "priority": -0.38,
+      "reason": "Twin penalty (19.5) with moderate risk (0.81) tests connectivity failure on critical dependency"
+    },
+    {
+      "experiment_id": "compound-rabbitmq-down-mysql-crash",
+      "rank": 5,
+      "priority": -0.05,
+      "reason": "Compound failure with measured 7s recovery validates cascading failure handling across queue and database"
+    },
+    {
+      "experiment_id": "latency-mysql",
+      "rank": 6,
+      "priority": -0.01,
+      "reason": "Twin penalty (60.0) with longest measured recovery (8.0s) tests degradation vs hard failure"
+    },
+    {
+      "experiment_id": "crash-hawkbit",
+      "rank": 7,
+      "priority": -0.04,
+      "reason": "Twin penalty (28.0) on stateful API; non-SPOF so lower impact but tests application-level resilience"
+    },
+    {
+      "experiment_id": "hang-hawkbit",
+      "rank": 8,
+      "priority": -0.23,
+      "reason": "Twin penalty (12.0) with measured 2.5s recovery; validates restart policy effectiveness"
+    },
+    {
+      "experiment_id": "crash-rabbitmq",
+      "rank": 9,
+      "priority": 0.36,
+      "reason": "SPOF queue component but twin penalty 0.0 indicates minimal predicted impact; confirms measurement"
+    },
+    {
+      "experiment_id": "hang-rabbitmq",
+      "rank": 10,
+      "priority": 0.32,
+      "reason": "Twin penalty 0.0 on SPOF queue; low informational value despite risk profile"
+    },
+    {
+      "experiment_id": "network-cut-rabbitmq",
+      "rank": 11,
+      "priority": 0.32,
+      "reason": "Twin penalty 0.0 on queue SPOF; redundant with hang-rabbitmq findings"
+    },
+    {
+      "experiment_id": "db-overload-mysql",
+      "rank": 12,
+      "priority": -0.65,
+      "reason": "Twin penalty 0.0 despite moderate risk (0.63); unlikely to yield insight"
+    },
+    {
+      "experiment_id": "packet-loss-mysql",
+      "rank": 13,
+      "priority": -0.61,
+      "reason": "Twin penalty 0.0; lower risk than network-cut on same component"
+    },
+    {
+      "experiment_id": "packet-loss-rabbitmq",
+      "rank": 14,
+      "priority": 0.29,
+      "reason": "Twin penalty 0.0 on queue; minimal information value"
+    },
+    {
+      "experiment_id": "cpu-throttle-mysql",
+      "rank": 15,
+      "priority": -0.68,
+      "reason": "Twin penalty 0.0 and lowest risk (0.54); least likely to reveal failure modes"
+    },
+    {
+      "experiment_id": "traffic-spike-hawkbit",
+      "rank": 16,
+      "priority": -0.46,
+      "reason": "Twin penalty 0.0 with measured 0% errors and 0s recovery; system handles gracefully"
+    },
+    {
+      "experiment_id": "latency-rabbitmq",
+      "rank": 17,
+      "priority": 0.29,
+      "reason": "rabbitmq: single point of failure for 1 services, holds state"
+    }
+  ],
+  "decided_by": "small",
+  "model": "claude-haiku-4-5"
+}

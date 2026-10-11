@@ -1,0 +1,11 @@
+Chaos Sentinel selftest on the Bosch hawkBit update server (real Docker)
+
+  ...   starting the app (first build takes a few minutes)
+  PASS  app up: 3/3 services running (hawkbit, mysql, rabbitmq)
+  PASS  map built: 3 services, 3 edges
+  PASS  baseline: 2.0 devices/s, 0.0% errors, p95 215.1 ms, 10/10 updated
+  PASS  fault injected: mysql killed, 0 errors (0.0%), p95 over the run 465.1 ms, peak 3 s p95 3221.1 ms
+  PASS  guard restored: guard tripped: p95 latency 3.2 s reached the 3.0 s limit; all services running: True
+  PASS  recovery measured: recovery 1.0 s; 0 devices stuck, 74/74 acknowledged devices updated; application answering at the end: management API HTTP 200
+
+PASS: selftest passed

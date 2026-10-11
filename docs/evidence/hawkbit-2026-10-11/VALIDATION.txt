@@ -1,0 +1,86 @@
+REAL HAWKBIT VALIDATION — 2026-10-11, Tejas's Mac
+
+Checkout: /Users/tejas./chaos-sentinel
+HEAD: 5b401616e1415b96df283c57abd7a4817a8ed0ca
+Latest main was pulled with existing local changes preserved. This is NOT a
+pristine-main validation. local-changes.patch and the two untracked twin files
+are included to document the exact local changes. No project source changes
+were made during this validation.
+
+COMPLETED
+1. Updated dependencies and started the real hawkBit Docker Compose stack.
+2. Isolated real selftest: six PASS checks and final PASS: selftest passed.
+   Baseline: 2 devices/s, 0% errors, p95 215.1 ms, 10/10 updated.
+   Crash mysql: 0% errors, whole-run p95 465.1 ms, peak rolling p95 3221.1 ms.
+   Guard tripped at 3 s; recovery 1 s; 74/74 acknowledged devices updated.
+   The official selftest.txt was collected with the web server stopped, after
+   an initial exploratory test overlapped with app startup. That first test is
+   not included as official evidence.
+3. Started TARGET=hawkbit RUNNER=auto python dev.py serve at localhost:8000.
+   Header says Docker; mapper shows hawkbit, mysql and rabbitmq.
+4. Ran all four requested Live experiments through the browser controls.
+
+Experiment                            Run ID    Updated  Errors Lost Recovery Guard
+Crash mysql                           r374892   72/72    0%     0    1 s      no
+Slow mysql network (+500 ms)           r947f41   26/26    0%     0    8 s      yes
+Cut rabbitmq, then crash mysql         rcda1cb   81/81    0%     0    7 s      no
+Hang mysql                            r6d4af7   85/85    0%     0    5 s      yes
+
+Whole-run p95 / peak rolling p95 (ms), as reported by the backend:
+Crash mysql: 241 / 1742
+Slow mysql network: 7250 / 7974
+Combined failure: 4985 / 1695.6
+Hang mysql: 4471 / 6116
+These are different metric populations; retain the raw JSON when interpreting
+them. The UI baseline p95 was 563 ms and its adaptive guard limit was 5630 ms
+(10 times baseline, minimum 3000 ms), not a universal fixed 3 s.
+Slow network tripped at 5.8 s against the 5.6 s displayed limit.
+Hang mysql tripped at 6.1 s against the 5.6 s displayed limit.
+
+5. Findings analysis completed. Score: 30.2/100 (displayed as 30/100).
+6. Campaign ranked all 17 experiments using the small model, Claude Haiku 4.5.
+   Twin rehearsal completed 17/17 in 10.9 s. Twin numbers are simulation,
+   not additional real Docker experiment results.
+7. Downloaded the actual findings .md through the Report tab. Architecture
+   overview was also saved from its advertised export endpoint.
+8. Latest ten real management-API targets all report updateStatus in_sync.
+9. Final Docker check: all three services running, MySQL healthy; management
+   API HTTP 200; app phase done with no active experiment.
+10. Automated checks: 136 backend tests passed; 14 frontend tests passed;
+    TypeScript and Vite production build passed. One non-fatal deprecation
+    warning is recorded in automated-checks.txt.
+
+BLOCKED / IMPORTANT LIMITATIONS FOR CLAUDE
+- The AI risk response was rejected by the validator (accepted=false in the
+  decision ledger); the accepted findings are rules-generated. The fix advice
+  was accepted from the small model. Do not label this report AI-generated
+  risk analysis without mentioning the fallback.
+- The only proposed fix, 'Fail fast when mysql is unreachable', is code advice
+  with auto_applicable=false. Checkbox, Approve and Re-run are disabled.
+  No fix was applied and no genuine before/after improvement was produced.
+- This session preserves previous history: 15 results total, including old
+  runs and two selftests. The 30.2 score is NOT a score of just these four new
+  runs. session-before-ui-tests.json and session-final.json preserve context.
+- The earlier roughly 96% error/stuck-device headline was NOT reproduced by
+  the fresh +500 ms run: all 26 devices updated, with latency degradation,
+  guard intervention and 8 s recovery. Do not claim a stuck server this time.
+- The unchanged exported report footer is stale: it lists fixed p95 3 s and
+  three-services-down guard limits, and says latency injection was not tested.
+  Real current UI runs used p95 5630 ms and unhealthy threshold 1, and latency
+  injection WAS tested. The architecture prose also has an agent-count
+  inconsistency. Correct these docs before submission, not the raw evidence.
+- Some accepted AI prediction/ranking explanations need human review: they
+  make workload/queue assumptions or attribute historic measurements that
+  are not established by these fresh runs. Prediction is not observation.
+
+EVIDENCE NOTES
+01-selftest.jpg is a real browser screenshot of the saved command output in
+a labeled transcript viewer, NOT a native Terminal screenshot. The remaining
+screenshots are of the actual Chaos Sentinel app. No generated mock screenshots.
+The ZIP includes raw JSON for the four new runs, analysis, plan and twin;
+device proof, service status, HTTP readiness, exports and automated-test log.
+No .env file, API keys or auth tokens are included.
+
+The main app and Docker stack are intentionally left running at localhost:8000.
+This evidence bundle is prepared for the user to send to Claude; nothing was
+uploaded or sent to Claude automatically. README/AGENTS/study guide unchanged.

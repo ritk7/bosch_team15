@@ -1,0 +1,4 @@
+NAME                 IMAGE                                  COMMAND                  SERVICE    CREATED        STATUS                   PORTS
+hawkbit-hawkbit-1    hawkbit/hawkbit-update-server:latest   "sh -c 'java ${JAVA_…"   hawkbit    16 hours ago   Up About an hour         0.0.0.0:8080->8080/tcp
+hawkbit-mysql-1      mysql:8.0                              "docker-entrypoint.s…"   mysql      16 hours ago   Up 6 minutes (healthy)   3306/tcp, 33060/tcp
+hawkbit-rabbitmq-1   rabbitmq:4-management-alpine           "docker-entrypoint.s…"   rabbitmq   16 hours ago   Up About an hour         4369/tcp, 5671-5672/tcp, 15671-15672/tcp, 15691-15692/tcp, 25672/tcp

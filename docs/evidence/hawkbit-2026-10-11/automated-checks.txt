@@ -1,0 +1,52 @@
+........................................................................ [ 52%]
+................................................................         [100%]
+=============================== warnings summary ===============================
+../.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /Users/tejas./chaos-sentinel/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+136 passed, 1 warning in 93.27s (0:01:33)
+
+> chaos-sentinel-ui@0.1.0 test
+> node --test tests/*.test.mjs
+
+✔ high latency never becomes 100% errors or gets clipped at 5 seconds (0.809125ms)
+✔ low error rates are preserved rather than normalized to the peak (0.108041ms)
+✔ genuine 100% errors stay 100% (0.077916ms)
+✔ empty charts and high guard thresholds use a finite scale (0.06825ms)
+✔ invalid values are excluded and points sorted without mutating the input (0.541959ms)
+✔ missing traffic creates a chart gap, not a fabricated return to zero (0.161792ms)
+✔ post-run guard bars retain fault peaks instead of the final idle sample (0.1825ms)
+✔ legacy runs exclude recovery from the guard timer instead of filling every time bar (0.596042ms)
+✔ refused starts have no fault peak readings (0.154833ms)
+✔ hanging requests still plot latency and retain the guard breach with zero completed requests (0.191291ms)
+✔ long restoration gaps are not interpolated into invented measurements (0.096ms)
+✔ meters clamp invalid, negative, unavailable and above-limit readings (0.09525ms)
+✔ heatmap includes latency, packet loss, overload and result-only types (1.076416ms)
+✔ multiple compound failures are not silently dropped from the heatmap (0.147834ms)
+ℹ tests 14
+ℹ suites 0
+ℹ pass 14
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.196792
+
+> chaos-sentinel-ui@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 1918 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                              0.46 kB │ gzip:  0.29 kB
+dist/assets/archivo-vietnamese-wdth-normal-rJmnGBSt.woff2   34.46 kB
+dist/assets/archivo-latin-ext-wdth-normal-7khWdh9v.woff2    86.24 kB
+dist/assets/archivo-latin-wdth-normal-DY7AcnAa.woff2        90.10 kB
+dist/assets/index-C11O8JHC.css                              47.26 kB │ gzip: 10.54 kB
+dist/assets/index-DzeUjMd0.js                              309.44 kB │ gzip: 93.91 kB
+
+✓ built in 194ms

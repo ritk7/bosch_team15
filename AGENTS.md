@@ -9,9 +9,10 @@ Bosch AI Hackathon, 10–11 Oct 2026 · Repo: github.com/ritk7/bosch_team15
 **An AI that predicts what a failure will do, breaks your app safely behind a kill switch written in plain code, proves
 every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.**
 
-Pitch in one breath: *"We ran it on Bosch's own hawkBit update server: after a short database slowdown, 96% of device
-updates failed and hawkBit never recovered by itself, while every container said 'running'. Chaos Sentinel predicts the
-damage, breaks the app safely, checks every device by id, recommends the fix and re-runs to prove it."*
+Pitch in one breath: *"We ran it on Bosch's own hawkBit update server with real devices. Updates were durable, every
+device landed, but half a second of database delay made updates 13 times slower and our guard had to step in; in an earlier
+session hawkBit even stayed dead until restarted while Docker said 'running'. Chaos Sentinel predicts the damage, breaks the
+app safely, checks every device by id, explains it and recommends the fix."*
 
 **Main project: Eclipse hawkBit.** The voting app is the blueprint: we built and proved the method there, show briefly
 that it works, and spend the demo on hawkBit.
@@ -213,10 +214,14 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 ## 10b. Real Bosch hawkBit findings (measured on Tejas's M4 Pro)
 - Our client drives hawkBit's real management API and device API: 718 devices created, the checked ones `in_sync`.
 - Crash mysql: 71/71 devices updated, recovered in 24 s. Combined (cut rabbitmq, crash mysql): 99/99, 14 s.
-- +500 ms latency on mysql: 96% of updates failed and **hawkBit's API never recovered by itself**; containers kept
+- **Latest validation (11 Oct, latest build, 5 real runs, evidence in `docs/evidence/hawkbit-2026-10-11`):** every device
+  updated (0 stuck) in crash, freeze and slow MySQL and RabbitMQ cut + MySQL crash; recovery 1–8 s. +500 ms on MySQL pushed
+  p95 from 0.56 s to 7.3 s (peak 8.0 s) and the guard tripped; hang mysql peaked at 6.1 s and tripped. Risk findings came from
+  the rules fallback (the AI answer failed validation); the only fix is code advice, so no hawkBit before/after re-run.
+- Earlier session (10 Oct): +500 ms latency on mysql: 96% of updates failed and **hawkBit's API never recovered by itself**; containers kept
   running. The same happened after one of two MySQL crashes. A restart of hawkBit fixed it.
-- So: hawkBit does not reliably re-establish its database connections after a disruption. That's our headline Bosch
-  finding. The fix to recommend: connection validation and pool eviction (e.g. Hikari keepalive / validation timeout),
+- So: hawkBit keeps updates durable but is latency-fragile, and it can intermittently fail to re-establish its database
+  connections after a disruption (seen in 2 of 4 runs on 10 Oct, 0 of 5 on 11 Oct). Say both halves honestly. The fix to recommend: connection validation and pool eviction (e.g. Hikari keepalive / validation timeout),
   plus a health check that exercises the database, so Docker can restart it automatically.
 - Tool changes driven by this run: application-level readiness (not just running containers), automatic repair and
   reporting of a wedged service, a rate-aware steady gate, hawkBit default 2 devices/s, fresh warm baselines.
@@ -225,6 +230,8 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 - Real hawkBit is built from its source and docs and tested on its twin; real-server verification runs on the 24 GB laptop.
 - Not built: disk-full (deliberate: shared VM disk), Kubernetes.
 - On hawkBit the AI planner doesn't beat random yet.
+- The hawkBit wedge is intermittent: seen on 10 Oct, not reproduced in the 11 Oct validation. On hawkBit the only fix is code
+  advice, so the before/after re-run is proven on the voting-app blueprint.
 - cAdvisor can't see containers on our Docker Desktop version, so Grafana shows our own measurements instead.
 
 ## 12. Demo script (90 seconds, hawkBit first)
@@ -232,7 +239,7 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 2. Switch the target to **Bosch hawkBit**: 3 services mapped (hawkbit → mysql, rabbitmq). "Units are now devices receiving an OTA update."
 3. mysql → **Slow network (+500 ms)**. The AI prediction appears. "It commits to numbers first."
 4. **Confirm and inject**: watch the device grid (updated or stuck); the guard watches and restores.
-5. Reveal: predicted vs measured. Tell the real-server result: "96% of updates failed and hawkBit never recovered by itself, though every container said running. We restart it and report it."
+5. Reveal: predicted vs measured. Tell the real-server result: "Every device still landed, but updates took 13 times longer and the guard stepped in. In an earlier session hawkBit stayed dead until restarted while Docker said running; we check the app, not the container."
 6. Pipeline tab: "Three AI agents decide, predict, explain and fix; safety is plain code."
 7. Findings → ranked weaknesses, score, recommended fix (connection validation + a database health check) → approve → re-run.
 8. Close on cost: the Cost tab.

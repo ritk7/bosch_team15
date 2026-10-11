@@ -60,10 +60,17 @@ def findings_report(engine) -> str:
             lines.append(f"| {row['title']} | {row['penalty']} | {row['error_pct']}% | {row['lost']} | {_rec(row['recovery_s'])} |")
         lines.append("")
     lines += ["## Assumptions and limits", ""] + [f"- {s}" for s in t.assumptions(engine.rate)] + [
-        "- Guard limits: error rate over 3 s ≥ 60%, p95 ≥ 3 s, 3 services down, or 45 s wall time.",
-        "- Not tested: network latency/packet loss injection (needs a privileged netem helper on Docker Desktop), disk-full.",
+        f"- Guard limits: {_guard_text(engine)}.",
+        "- Not injected on purpose: full disk (Docker Desktop's disk is shared by every container on the machine).",
         "- Model costs come from the ledger (Cost tab); rupee figures use USD_INR from backend/.env.", ""]
     return "\n".join(lines)
+
+
+def _guard_text(engine) -> str:
+    # the live thresholds: p95 adapts to the measured baseline, blast radius to the app's size
+    th = engine.guard.base
+    return (f"error rate over 3 s ≥ {th.error_rate:.0%}, p95 ≥ max({th.p95_ms / 1000:g} s, 10× the measured baseline), "
+            f"{th.unhealthy} other service{'s' if th.unhealthy != 1 else ''} down (blast radius), or > {th.max_wall_s:g} s")
 
 
 def architecture(engine) -> str:
@@ -81,7 +88,7 @@ compose file ──► Mapper ──► dependency graph (services, depends_on, 
                                 │
          Digital twin ◄─────────┤ rehearses every experiment in seconds, ranks them, AI vs random computed
                                 ▼
- Planner agent (AI/rules) ─► picks next experiment + reason ─► Predict agent: errors %, units lost, recovery s
+ Planner agent (AI/rules) ─► picks next experiment + reason, and predicts errors %, units lost, recovery s
                                 ▼
  Injector (docker CLI, project-scoped) ─► fault ─► target app ◄── Probe: units by id, checked in the database
                                 ▲                                     │
@@ -98,13 +105,13 @@ Services: {nodes}. Data flows: {flows}.
 
 ## How the AI makes decisions
 - Three model-backed agents, each one `llm.complete` call with a strict JSON check and a rules fallback that works alone:
-  **planner** (next experiment and why), **predictor** (expected errors, lost units, recovery), **risk** (ranked findings),
-  **fix** (concrete steps). Cheapest tier first (small model), a response cache, and a cost ledger for every decision.
+  **planner** (next experiment and why, plus the prediction: expected errors, lost units, recovery), **risk** (ranked
+  findings), **fix** (concrete steps). Cheapest tier first (small model), a response cache, and a cost ledger for every decision.
 - Models only choose from an allow-listed catalog and only reword findings; any number a model writes must already be in
   the measured evidence, or the answer is rejected and the rules output is used.
 
 ## Safety controls
-- The guard is plain code, never a model: error rate over 3 s ≥ 60%, p95 ≥ 3 s, ≥ 3 services down, or > 45 s.
+- The guard is plain code, never a model: {_guard_text(engine)}.
 - Every command is scoped to the target's compose project (`docker compose -p <project>`), service names are allow-listed
   from the compose file; a crash is SIGKILL of exactly that container's process.
 - Restore runs in `finally`; the active fault is persisted to `.cache/active_fault.json` and undone on the next start;

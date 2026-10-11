@@ -1,0 +1,167 @@
+{
+  "analysis": {
+    "findings": [
+      {
+        "id": "F1",
+        "service": "hawkbit",
+        "experiment_id": "crash-hawkbit",
+        "severity": "critical",
+        "title": "Recovery was not observed after “Crash hawkbit”",
+        "evidence": [
+          "crash-hawkbit: 70 sent, 4 acknowledged, 4 updated, 0 stuck",
+          "errors 94.3%, p95 over the run 15959 ms, peak 3 s p95 17460 ms, recovery not observed (bounded recovery window)",
+          "guard: Error rate 67% over the last 3 s reached the 60% limit"
+        ],
+        "impact": "The probe did not establish five consecutive healthy devices within the bounded recovery window.",
+        "confidence": "high"
+      },
+      {
+        "id": "F2",
+        "service": "mysql",
+        "experiment_id": "hang-mysql",
+        "severity": "high",
+        "title": "“Hang mysql” breaches the safety limits",
+        "evidence": [
+          "hang-mysql: 85 sent, 85 acknowledged, 85 updated, 0 stuck",
+          "errors 0.0%, p95 over the run 4471 ms, peak 3 s p95 6116 ms, recovery 5.0 s",
+          "guard: p95 latency 6.1 s reached the 5.6 s limit"
+        ],
+        "impact": "The measured run reached a safety threshold and triggered restoration; overall errors were 0.0%.",
+        "confidence": "high"
+      },
+      {
+        "id": "F3",
+        "service": "mysql",
+        "experiment_id": "network-cut-mysql",
+        "severity": "high",
+        "title": "“Cut mysql off the network” breaches the safety limits",
+        "evidence": [
+          "network-cut-mysql: 16 sent, 16 acknowledged, 16 updated, 0 stuck",
+          "errors 0.0%, p95 over the run 4046 ms, peak 3 s p95 4046 ms, recovery 3.0 s",
+          "guard: p95 latency 3.2 s reached the 3.0 s limit"
+        ],
+        "impact": "The measured run reached a safety threshold and triggered restoration; overall errors were 0.0%.",
+        "confidence": "high"
+      },
+      {
+        "id": "F4",
+        "service": "mysql",
+        "experiment_id": "latency-mysql",
+        "severity": "high",
+        "title": "“Slow network on mysql (+500 ms)” breaches the safety limits",
+        "evidence": [
+          "latency-mysql: 26 sent, 26 acknowledged, 26 updated, 0 stuck",
+          "errors 0.0%, p95 over the run 7250 ms, peak 3 s p95 7974 ms, recovery 8.0 s",
+          "guard: p95 latency 5.8 s reached the 5.6 s limit"
+        ],
+        "impact": "The measured run reached a safety threshold and triggered restoration; overall errors were 0.0%.",
+        "confidence": "high"
+      },
+      {
+        "id": "F5",
+        "service": "hawkbit",
+        "experiment_id": "hang-hawkbit",
+        "severity": "high",
+        "title": "“Hang hawkbit” breaches the safety limits",
+        "evidence": [
+          "hang-hawkbit: 17 sent, 17 acknowledged, 17 updated, 0 stuck",
+          "errors 0.0%, p95 over the run 3618 ms, peak 3 s p95 3618 ms, recovery 2.5 s",
+          "guard: p95 latency 3.1 s reached the 3.0 s limit"
+        ],
+        "impact": "The measured run reached a safety threshold and triggered restoration; overall errors were 0.0%.",
+        "confidence": "high"
+      }
+    ],
+    "score": {
+      "value": 30.2,
+      "breakdown": [
+        {
+          "name": "Crash hawkbit",
+          "points": -51.1,
+          "max": 60.0,
+          "note": "worst case, counted in full: recovery not observed within the bounded window, needed the kill switch, 94.3% errors"
+        },
+        {
+          "name": "Hang mysql",
+          "points": -4.8,
+          "max": 60.0,
+          "note": "counted at 35%: needed the kill switch"
+        },
+        {
+          "name": "Slow network on mysql (+500 ms)",
+          "points": -4.8,
+          "max": 60.0,
+          "note": "counted at 35%: needed the kill switch"
+        },
+        {
+          "name": "Cut mysql off the network",
+          "points": -4.8,
+          "max": 60.0,
+          "note": "counted at 35%: needed the kill switch"
+        },
+        {
+          "name": "Hang hawkbit",
+          "points": -4.2,
+          "max": 60.0,
+          "note": "counted at 35%: needed the kill switch"
+        },
+        {
+          "name": "5 experiments without measurable harm",
+          "points": 0,
+          "max": 0,
+          "note": "they do not raise the score"
+        }
+      ],
+      "services": [
+        {
+          "service": "hawkbit",
+          "value": 44.7,
+          "experiments": 3,
+          "worst": "Crash hawkbit"
+        },
+        {
+          "service": "mysql",
+          "value": 76.5,
+          "experiments": 5,
+          "worst": "Hang mysql"
+        },
+        {
+          "service": "rabbitmq",
+          "value": 100.0,
+          "experiments": 2,
+          "worst": null
+        }
+      ]
+    },
+    "decided_by": "rules",
+    "model": "rules engine"
+  },
+  "fixes": {
+    "fixes": [
+      {
+        "id": "X1",
+        "finding_id": "F2",
+        "title": "Fail fast when mysql is unreachable",
+        "change_type": "code",
+        "snippet": "# Implementation checklist, not a drop-in config\n# Dependency: mysql; callers: hawkbit\n# Bound connection, pool-acquisition and read waits in this application's client library.\n# Return a controlled unavailable response; make retries bounded and idempotent.\n# Validate settings against the deployed driver and framework version.",
+        "steps": [
+          "Configure mysql client connection timeout and read timeout in hawkbit's database driver to 5-10 seconds; validate settings match your deployed driver and framework version.",
+          "Wrap mysql queries in hawkbit with try-catch; on timeout or unavailable exception, return HTTP 503 with Retry-After header.",
+          "Test with chaos scenario 'Cut mysql off the network' to confirm hawkbit fails fast and clients receive 503 instead of hanging."
+        ],
+        "expected_score_gain": 5.0,
+        "auto_applicable": false
+      }
+    ],
+    "decided_by": "small",
+    "model": "claude-haiku-4-5"
+  },
+  "score_history": [
+    {
+      "label": "before fix",
+      "value": 30.2,
+      "ts": 1791685871.65185
+    }
+  ],
+  "applied_fixes": []
+}

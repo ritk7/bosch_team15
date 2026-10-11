@@ -128,7 +128,7 @@ harmless experiments never raises the score. Same results, same score. Per-servi
 ### Milestone 1 (Day 1 minimum)
 | Requirement | Where |
 |---|---|
-| Running containerised open-source app | voting app (Apache-2.0) on real Docker; hawkBit (EPL-2.0) on a 24 GB machine |
+| Running containerised open-source app | hawkBit (EPL-2.0) on real Docker on a 24 GB machine; voting-app blueprint (Apache-2.0) on real Docker |
 | Dependency map | Live tab map, `/api/target`, `mapper.py` |
 | One safe failure injection | crash experiment; `python dev.py selftest` PASS on all 6 steps |
 | Working kill switch | Guard card, Stop & restore button, `/api/killswitch`, guard tests |
@@ -154,7 +154,7 @@ harmless experiments never raises the score. Same results, same score. Per-servi
 | Live dashboard | done (Live and Pipeline tabs) |
 | Open-source observability | done (`docker-compose.observability.yml`: Prometheus + Grafana, `/metrics`) |
 | CI gate | done (`python -m app.cli gate --min-score 80`) |
-| Run on Bosch's own software | done: hawkBit; finding: API stays dead after MySQL disruption until restarted |
+| Run on Bosch's own software | done: real hawkBit, selftest 6/6 PASS; updates durable (0 stuck in 5 runs), latency-fragile (p95 0.56 → 7–8 s, guard tripped), intermittent wedge seen on 10 Oct; evidence in `docs/evidence/hawkbit-2026-10-11` |
 | Cost proof | done (Cost tab, ledger) |
 | Full disk | not built, on purpose (safety) |
 

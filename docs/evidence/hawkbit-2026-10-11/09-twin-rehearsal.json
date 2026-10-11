@@ -1,0 +1,204 @@
+{
+  "twin": {
+    "status": "done",
+    "rows": [
+      {
+        "experiment_id": "compound-rabbitmq-down-mysql-crash",
+        "title": "Cut rabbitmq, then crash mysql",
+        "target": "mysql",
+        "type": "compound",
+        "penalty": 15.1,
+        "error_pct": 7.4,
+        "lost": 0,
+        "recovery_s": 4.9,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "crash-mysql",
+        "title": "Crash mysql",
+        "target": "mysql",
+        "type": "crash",
+        "penalty": 15.4,
+        "error_pct": 9.5,
+        "lost": 0,
+        "recovery_s": 5.1,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "crash-rabbitmq",
+        "title": "Crash rabbitmq",
+        "target": "rabbitmq",
+        "type": "crash",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "compound-mysql-hang-traffic-spike",
+        "title": "Device surge while mysql is frozen",
+        "target": "mysql",
+        "type": "compound",
+        "penalty": 60.0,
+        "error_pct": 94.6,
+        "lost": 0,
+        "recovery_s": null,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "hang-mysql",
+        "title": "Hang mysql",
+        "target": "mysql",
+        "type": "hang",
+        "penalty": 60.0,
+        "error_pct": 94.4,
+        "lost": 0,
+        "recovery_s": null,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "hang-rabbitmq",
+        "title": "Hang rabbitmq",
+        "target": "rabbitmq",
+        "type": "hang",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "network-cut-mysql",
+        "title": "Cut mysql off the network",
+        "target": "mysql",
+        "type": "network_cut",
+        "penalty": 19.5,
+        "error_pct": 33.3,
+        "lost": 0,
+        "recovery_s": 2.5,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "network-cut-rabbitmq",
+        "title": "Cut rabbitmq off the network",
+        "target": "rabbitmq",
+        "type": "network_cut",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "latency-mysql",
+        "title": "Slow network on mysql (+500 ms)",
+        "target": "mysql",
+        "type": "latency",
+        "penalty": 60.0,
+        "error_pct": 95.8,
+        "lost": 0,
+        "recovery_s": null,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "latency-rabbitmq",
+        "title": "Slow network on rabbitmq (+500 ms)",
+        "target": "rabbitmq",
+        "type": "latency",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "packet-loss-mysql",
+        "title": "Lossy network on mysql (25% loss)",
+        "target": "mysql",
+        "type": "packet_loss",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "packet-loss-rabbitmq",
+        "title": "Lossy network on rabbitmq (25% loss)",
+        "target": "rabbitmq",
+        "type": "packet_loss",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "crash-hawkbit",
+        "title": "Crash hawkbit",
+        "target": "hawkbit",
+        "type": "crash",
+        "penalty": 28.2,
+        "error_pct": 80.4,
+        "lost": 0,
+        "recovery_s": 20.4,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "db-overload-mysql",
+        "title": "Overload mysql (heavy queries + 0.5 CPU)",
+        "target": "mysql",
+        "type": "db_overload",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "hang-hawkbit",
+        "title": "Hang hawkbit",
+        "target": "hawkbit",
+        "type": "hang",
+        "penalty": 12.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 2.5,
+        "guard_tripped": true
+      },
+      {
+        "experiment_id": "cpu-throttle-mysql",
+        "title": "Throttle mysql to 0.1 CPU",
+        "target": "mysql",
+        "type": "cpu_throttle",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      },
+      {
+        "experiment_id": "traffic-spike-hawkbit",
+        "title": "Traffic spike on hawkbit (6\u00d7)",
+        "target": "hawkbit",
+        "type": "traffic_spike",
+        "penalty": 0.0,
+        "error_pct": 0.0,
+        "lost": 0,
+        "recovery_s": 0.0,
+        "guard_tripped": false
+      }
+    ],
+    "ran_at": 1791685957.03399,
+    "attempted": 17,
+    "failed": [],
+    "completed": 17,
+    "seconds": 10.9
+  },
+  "compare": {
+    "planner_runs_to_top3": 14,
+    "random_runs_to_top3": 14.0,
+    "note": "Top 3 weaknesses on the twin: compound-mysql-hang-traffic-spike, hang-mysql, latency-mysql. Planner order found them in 14 runs; random order needs 14.0 on average over 200 shuffles (of 17 experiments)."
+  }
+}
