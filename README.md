@@ -1,5 +1,7 @@
 # Chaos Sentinel
 
+[![tests](https://github.com/ritk7/bosch_team15/actions/workflows/tests.yml/badge.svg)](https://github.com/ritk7/bosch_team15/actions/workflows/tests.yml) ![license: MIT](https://img.shields.io/badge/license-MIT-blue)
+
 **An AI that predicts what a failure will do, breaks your app safely behind a kill switch that is plain code, proves
 every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.**
 

@@ -1,6 +1,6 @@
 # Verify every claim in 5 minutes
 
-Every number in this repo is measured, never typed in. This page lists each claim, where it lives, and how to check it.
+Every number in this repo is measured, never typed in. CI runs the full test suite on every push: [![tests](https://github.com/ritk7/bosch_team15/actions/workflows/tests.yml/badge.svg)](https://github.com/ritk7/bosch_team15/actions/workflows/tests.yml) This page lists each claim, where it lives, and how to check it.
 
 ## 1. Run the checks
 
