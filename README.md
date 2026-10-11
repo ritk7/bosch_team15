@@ -24,7 +24,7 @@ and proven on an 8 GB laptop before pointing the same tool at hawkBit.
 | **Fix proven by re-run** | Voting-app blueprint on real Docker: resilience score **29 → 56.5** after an approved `restart: unless-stopped` |
 | **Tested** | 135 backend tests + 33 end-to-end system checks on real Docker + hawkBit selftest 6/6 PASS |
 | **Verify it yourself** | [**JUDGING.md**](JUDGING.md): every claim, the command that proves it, and what you should see |
-| **Docs** | [Architecture and workflow](docs/ARCHITECTURE.md) · [API contract](docs/CONTRACT.md) · [timeline](docs/TIMELINE.md) · [team form](docs/TEAM_FORM.md) |
+| **Docs** | [Architecture overview (one page)](docs/ARCHITECTURE_OVERVIEW.md) · [Architecture and workflow](docs/ARCHITECTURE.md) · [API contract](docs/CONTRACT.md) · [timeline](docs/TIMELINE.md) · [team form](docs/TEAM_FORM.md) |
 
 ## What it does
 

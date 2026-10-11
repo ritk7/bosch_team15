@@ -20,6 +20,7 @@ No AI key? Every agent falls back to deterministic rules; the product still work
 |---|---|---|
 | Works end to end on real Docker | `scripts/system_test.py` | 33 PASS: map, baseline, 4 real experiments, findings, fix, re-run, twin, report, metrics, kill switch, reset |
 | Real Bosch hawkBit, not only a mock | [`docs/evidence/hawkbit-2026-10-11/`](docs/evidence/hawkbit-2026-10-11) | `selftest.txt` 6/6 PASS; raw JSON per run; `devices.txt` shows `updateStatus: in_sync` from hawkBit's own API |
+| AI-written ranked findings report with fixes (Day-2 minimum) | [`docs/sample-findings-report-voting.md`](docs/sample-findings-report-voting.md) | "Written by: small (claude-haiku-4-5)", ranked weaknesses, recommended fixes, before/after score |
 | hawkBit findings (15 runs, 0 lost, crash hawkbit → 94.3% errors, MySQL delay → p95 0.56 → 7.3 s) | [`docs/sample-findings-report-hawkbit.md`](docs/sample-findings-report-hawkbit.md) | Ranked findings with per-run evidence and the "All runs" table |
 | Silent data loss is caught (HTTP 200 is not trusted) | `backend/app/probe.py`; system test "ghost votes appear only in the combined failure" | Pause worker + crash redis: 225 acknowledged, 23 never stored |
 | Safety is code, never a model | [`backend/app/guard.py`](backend/app/guard.py) (about 50 lines) | 4 limits: error rate ≥ 60% over 3 s, p95 ≥ max(3 s, 10× baseline), collateral services down, 45 s |
@@ -45,7 +46,7 @@ No AI key? Every agent falls back to deterministic rules; the product still work
 | 2 | AI ranks and selects experiments with reasons | `planner.py`; Campaign tab "Rank every experiment" |
 | 2 | 3+ failure types; errors, slowdowns, recovery | 9 types: crash, hang, network cut, delay, packet loss, CPU throttle, DB overload, traffic spike, combined |
 | 2 | AI explains, ranks by severity, fixes, score | Findings tab; `analysis.py`, `score.py`, `fixes.py` |
-| 2 | Architecture overview, findings report | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/sample-findings-report-hawkbit.md`](docs/sample-findings-report-hawkbit.md) |
+| 2 | Architecture overview, findings report | [`docs/ARCHITECTURE_OVERVIEW.md`](docs/ARCHITECTURE_OVERVIEW.md) (one page), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/sample-findings-report-hawkbit.md`](docs/sample-findings-report-hawkbit.md) |
 | Stretch | Re-run after a fix | Findings → Approve → Re-run (29 → 56.5) |
 | Stretch | Live dashboard | Live and Pipeline tabs |
 | Stretch | Combined failures | 4 combined experiments, e.g. "device surge while mysql is frozen" |
