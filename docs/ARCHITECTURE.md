@@ -8,7 +8,8 @@ Bosch requirement (Milestone 1, Milestone 2, optional) is met, with the file or 
 ## 1. What it does, in one line
 An AI chaos-engineering tool for any Docker Compose app: it **maps** the app, **predicts** the damage, **injects** a fault
 behind a deterministic kill switch, **measures** every unit of work by id, **restores**, **explains**, proposes a **fix**, and
-**re-runs** to prove the fix. Targets: Docker's voting app (5 services) and Bosch's own Eclipse hawkBit (OTA update server).
+**re-runs** to prove the fix. **Main target: Bosch's own Eclipse hawkBit** (OTA update server). Blueprint: Docker's voting app, where the method was
+built and proven before pointing it at hawkBit.
 
 ## 2. Layers
 

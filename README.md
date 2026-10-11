@@ -5,8 +5,10 @@ every unit of work that silently disappeared, recommends the fix, and re-runs to
 
 Bosch AI hackathon 2026 · Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nair, Akram Lateef, Tejas, Akhilesh K.
 
-Targets: Docker's open-source [example-voting-app](https://github.com/dockersamples/example-voting-app) (5 services) and
-Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-air update server (monolith + MySQL + RabbitMQ).
+**Main target: Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit)**, the over-the-air software update server
+for devices and vehicles (monolith + MySQL + RabbitMQ). Units of work are devices receiving an update: "updated" or "stuck".
+Blueprint: Docker's [example-voting-app](https://github.com/dockersamples/example-voting-app), where the method was built
+and proven on an 8 GB laptop before pointing the same tool at hawkBit.
 
 **Architecture and workflow:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagram, one-experiment workflow, AI agents, safety, requirement coverage).
 
@@ -27,8 +29,14 @@ Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-a
 | Observability tool | Prometheus + Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map |
 | Low cost | Rules first, small model second (Claude Haiku via an OpenAI-compatible router), response cache, cost ledger. Works with no model at all |
 
-**Ghost votes** (verified on real Docker): pause the worker, then crash Redis. 224 votes got HTTP 200; 24 never reached
-the database, and the worker then died on reconnect. An HTTP health check calls this healthy. We count lost votes by id.
+**Headline finding on Bosch's hawkBit** (real server, 718 devices driven through its real APIs): after +500 ms of latency
+on MySQL, 96% of device updates failed and **hawkBit's API never recovered by itself**, while all three containers still
+showed "running". The same happened after one of two MySQL crashes. A Docker health check calls this healthy. Chaos
+Sentinel detects it by checking every device's update status by id, restarts the wedged server and reports it. Fix:
+database connection validation and pool eviction, plus a health check that exercises the database.
+
+Blueprint check on the voting app (real Docker): pause the worker, then crash Redis: 225 votes got HTTP 200, 23 never
+reached the database.
 
 ## Run it
 
@@ -83,17 +91,17 @@ Once restoration is verified and the guard is disarmed, recovery has its own bou
 time spent waiting for service health checks does not subtract from that window. Self-tests use unique device IDs
 on every invocation and append to saved run history.
 
-## The demo (90 seconds)
-1. Live tab: click **redis** → **Pause worker, then crash redis**. The AI prediction appears; optionally type your own guess.
-2. **Confirm and inject**: the worker freezes, Redis dies, units pile up in red on the map, the grid fills amber.
-3. The guard trips and restores; the reveal shows predicted vs measured, and your guess against the AI. Votes lost silently.
-   The services that were faulted stay outlined on the map after the restore.
-4. Pipeline tab: the 12 stages (mapper, twin, planner, prediction, injector, guard, probe, restore, risk, score, fix, approve)
+## The demo (90 seconds, hawkBit first)
+1. **Blueprint, 15 s:** voting app on real Docker, click **redis** → **Crash redis**: the guard trips and restores. Proof the tool works.
+2. Header: switch the target to **Bosch hawkBit update server**: 3 services mapped; units become devices getting an update.
+3. Click **mysql** → **Slow network on mysql (+500 ms)**. The AI prediction appears; optionally type your own guess.
+4. **Confirm and inject**: watch the devices (updated or stuck), the guard watches and restores; the reveal shows predicted vs measured.
+   On the real server this left hawkBit's API dead until restarted (96% of updates failed); the tool restarts and reports it.
+5. Pipeline tab: the 12 stages (mapper, twin, planner, prediction, injector, guard, probe, restore, risk, score, fix, approve)
    as a live wiring diagram; each stage shows its real latest output, the running stage pulses, the wire is cut when the guard trips.
-5. Findings tab: **Analyse runs** → ranked weaknesses and score → tick the restart fix → **Approve and apply** → **Re-run**: score rises.
-6. Campaign tab: **Rehearse all on the twin** (heatmap in seconds), **Rank every experiment** (AI plan with reasons), AI planner against random.
+6. Findings tab: **Analyse runs** → ranked weaknesses and score → tick a fix → **Approve and apply** → **Re-run**.
+7. Campaign tab: **Rehearse all on the twin** (heatmap in seconds), **Rank every experiment** (AI plan with reasons).
    Press **S** (or Stage mode) for a projector.
-7. Header: switch the target to **Bosch hawkBit update server**: same tool, Bosch's own OTA server; units become devices.
 
 ## The UI
 Tabs: **Live** (status strip with the run's phases and counters, dependency map, prediction and reveal, guard, live chart,

@@ -9,8 +9,12 @@ Bosch AI Hackathon, 10–11 Oct 2026 · Repo: github.com/ritk7/bosch_team15
 **An AI that predicts what a failure will do, breaks your app safely behind a kill switch written in plain code, proves
 every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.**
 
-Pitch in one breath: *"Others break things and read logs. We predict the damage, break the app safely, count every lost
-vote, fix it, and show the score go up, for a few rupees."*
+Pitch in one breath: *"We ran it on Bosch's own hawkBit update server: after a short database slowdown, 96% of device
+updates failed and hawkBit never recovered by itself, while every container said 'running'. Chaos Sentinel predicts the
+damage, breaks the app safely, checks every device by id, recommends the fix and re-runs to prove it."*
+
+**Main project: Eclipse hawkBit.** The voting app is the blueprint: we built and proved the method there, show briefly
+that it works, and spend the demo on hawkBit.
 
 ## 2. The problem (Bosch's statement)
 "Build an AI system that intelligently introduces controlled failures into a cloud-native application environment and
@@ -43,10 +47,10 @@ Seven properties, each one a scoring story:
    Bosch's own hawkBit.
 
 ## 4. The apps we test
-| Target | What it is | Why |
-|---|---|---|
-| Docker example-voting-app (Apache-2.0) | 5 services: vote (Flask) → redis (queue) → worker (.NET) → db (Postgres) → result (Node) | The classic multi-service app. Runs on an 8 GB laptop. Has a real queue, so data can be lost |
-| **Eclipse hawkBit (EPL-2.0, from Bosch Software Innovations)** | Bosch's over-the-air software update server for devices and vehicles: monolith + MySQL + RabbitMQ | **Most teams use the voting app; nobody else tests Bosch's own product.** Units become devices getting an update: "updated" or "stuck" |
+| Role | Target | What it is | Why |
+|---|---|---|---|
+| **Main project** | **Eclipse hawkBit (EPL-2.0, from Bosch Software Innovations)** | Bosch's over-the-air software update server for devices and vehicles: monolith + MySQL + RabbitMQ | **Most teams use the voting app; nobody else tests Bosch's own product.** Units become devices getting an update: "updated" or "stuck" |
+| Blueprint | Docker example-voting-app (Apache-2.0) | 5 services: vote → redis (queue) → worker → db (Postgres) → result | Where the method was built and proven on an 8 GB laptop; shown briefly to prove the tool works |
 
 ## 5. Architecture
 
@@ -223,16 +227,15 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 - On hawkBit the AI planner doesn't beat random yet.
 - cAdvisor can't see containers on our Docker Desktop version, so Grafana shows our own measurements instead.
 
-## 12. Demo script (90 seconds)
-1. Live tab: the map with 5 green services, the Docker badge. "Mapped automatically, including hidden data flows."
-2. redis → **Pause worker, then crash redis**. The AI prediction appears. "It commits to numbers first." Judge enters a guess.
-3. **Confirm and inject**: worker frozen, redis dies, red units pile up, blast-radius outlines, amber grid.
-4. The guard trips and restores. Reveal: predicted vs measured vs the judge. "Every vote got 200 OK. About 25 vanished."
-5. Pipeline tab: "Here is every stage that just ran: three AI agents, plain-code safety, the engineer approves." Wires show the flow.
-6. Findings → Analyse → ranked weaknesses and score → approve the restart fix → Re-run → score rises.
-7. Campaign → Rehearse on the twin: heatmap in seconds; AI vs random.
-8. Switch the target to **Bosch hawkBit**: same tool, Bosch's own OTA server.
-9. Close on cost: read the rupee figure from the Cost tab.
+## 12. Demo script (90 seconds, hawkBit first)
+1. **Blueprint, 15 s.** Voting app on real Docker: crash redis, the guard trips and restores. "The tool works on any compose app; we proved it here."
+2. Switch the target to **Bosch hawkBit**: 3 services mapped (hawkbit → mysql, rabbitmq). "Units are now devices receiving an OTA update."
+3. mysql → **Slow network (+500 ms)**. The AI prediction appears. "It commits to numbers first."
+4. **Confirm and inject**: watch the device grid (updated or stuck); the guard watches and restores.
+5. Reveal: predicted vs measured. Tell the real-server result: "96% of updates failed and hawkBit never recovered by itself, though every container said running. We restart it and report it."
+6. Pipeline tab: "Three AI agents decide, predict, explain and fix; safety is plain code."
+7. Findings → ranked weaknesses, score, recommended fix (connection validation + a database health check) → approve → re-run.
+8. Close on cost: the Cost tab.
 
 ## 13. Slide deck outline (8–10 slides)
 1. **Title**: Chaos Sentinel. "Break it on purpose. Prove what broke. Prove the fix."
