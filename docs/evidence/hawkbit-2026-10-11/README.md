@@ -1,6 +1,10 @@
 # Real hawkBit validation, 11 Oct 2026 (Tejas's 24 GB M4 Pro)
 
-Raw evidence as collected; see `VALIDATION.txt` for Tejas's own summary and limitations.
+Raw evidence as collected; see `VALIDATION.txt` for Tejas's own summary and limitations. The full session (15 real runs,
+score 30/100, worst: crash hawkbit 94.3% errors, not back within 30 s) is in `hawkbit-findings-report.md`;
+a footer-corrected copy is `docs/sample-findings-report-hawkbit.md`.
+
+The four new UI runs plus the selftest:
 
 | Run | Devices updated | Stuck | p95 whole run / peak (ms) | Recovery | Guard |
 |---|---|---|---|---|---|

@@ -25,21 +25,22 @@ and proven on an 8 GB laptop before pointing the same tool at hawkBit.
 | Intelligent planning | AI ranked plan (every experiment, a reason each); AI campaign planner adapting to measurements and the twin; fault window chosen by risk, injection only into a steady app; digital twin rehearsal of the whole catalog in seconds; AI vs random computed (voting app: 3 runs vs 11.9 to find the top 3 weaknesses) |
 | Errors, slowdowns, recovery | Every run: error %, p95 and peak p95, recovery time, units lost silently, timeline and a 100-unit grid |
 | Findings, fixes, score | Ranked findings with measured evidence (the model may reword, never invent numbers), fixes with compose snippets, deterministic resilience score with breakdown and **services ranked by resilience** |
-| Stretch goals | Live dashboard; combined failures (ghost votes); apply a fix and re-run: on real Docker the score went **57 → 74** after `restart: unless-stopped` |
+| Stretch goals | Live dashboard; combined failures (ghost votes); apply a fix and re-run: on real Docker (voting blueprint) the score went **29 → 56.5** after `restart: unless-stopped` |
 | Observability tool | Prometheus + Grafana overlay scraping our `/metrics`; real CPU and memory per container on the map |
 | Low cost | Rules first, small model second (Claude Haiku via an OpenAI-compatible router), response cache, cost ledger. Works with no model at all |
 
-**Findings on Bosch's real hawkBit** (24 GB M4 Pro, devices driven through hawkBit's real management and device APIs;
-evidence in [`docs/evidence/hawkbit-2026-10-11`](docs/evidence/hawkbit-2026-10-11)):
-- **Updates are durable:** in 5 real runs on the latest build (crash, freeze and slow MySQL, RabbitMQ cut + MySQL crash)
-  every device ended `in_sync`: 0 stuck, recovery 1–8 s.
-- **hawkBit is latency-fragile:** +500 ms on MySQL pushed device-update p95 from 0.56 s to 7–8 s (about 13×) and the guard
-  had to stop the fault; freezing MySQL did the same (6.1 s).
-- **Intermittent wedge:** in an earlier session (10 Oct) the same faults left hawkBit's API dead until restarted in 2 of 4
-  runs while every container said "running" (96% of updates failed in the latency run). It did not reproduce on 11 Oct.
-  Chaos Sentinel checks that the app answers, not just that containers run, and restarts and reports a wedged server.
-- Recommended: database connection validation and pool eviction, query timeouts / fail fast, and a health check that
-  exercises the database.
+**Findings on Bosch's real hawkBit** (11 Oct, Tejas's 24 GB M4 Pro: 15 real runs, 10 experiment types, 867 devices driven
+through hawkBit's real management and device APIs; report [`docs/sample-findings-report-hawkbit.md`](docs/sample-findings-report-hawkbit.md),
+raw evidence [`docs/evidence/hawkbit-2026-10-11`](docs/evidence/hawkbit-2026-10-11)). Resilience score **30/100**.
+- **Updates are durable:** 0 devices stuck in any run.
+- **Critical, hawkBit itself is the weak point:** crash the hawkBit server and 94.3% of device updates fail; it was not
+  back within the 30 s recovery window despite `restart: always` (one replica, slow Java start). Weakest service: hawkbit 44.7/100.
+- **Slow, frozen or cut MySQL stalls updates:** device-update p95 rises from 0.56 s to 4–8 s (+500 ms delay: 7.3 s, peak 8.0 s)
+  and the guard tripped in all three. RabbitMQ failures had no measurable impact (100/100).
+- **Intermittent wedge:** on 10 Oct the API stayed dead after a MySQL disruption in 2 of 4 runs while containers said
+  "running"; not reproduced in the 11 Oct runs. Chaos Sentinel checks that the app answers, not just that containers run.
+- Recommended: fail fast on MySQL timeouts (bounded connection and read waits, 503 + Retry-After; written by the fix agent),
+  database connection validation, and a health check that exercises the database.
 
 Blueprint check on the voting app (real Docker): pause the worker, then crash Redis: 225 votes got HTTP 200, 23 never
 reached the database.
@@ -103,6 +104,7 @@ on every invocation and append to saved run history.
 3. Click **mysql** → **Slow network on mysql (+500 ms)**. The AI prediction appears; optionally type your own guess.
 4. **Confirm and inject**: watch the devices (updated or stuck), the guard watches and restores; the reveal shows predicted vs measured.
    On the real server device-update latency went from 0.56 s to about 8 s and the guard stopped it; no device was lost.
+   The worst real result: crashing hawkBit itself, 94.3% of updates failed and it was not back within 30 s.
 5. Pipeline tab: the 12 stages (mapper, twin, planner, prediction, injector, guard, probe, restore, risk, score, fix, approve)
    as a live wiring diagram; each stage shows its real latest output, the running stage pulses, the wire is cut when the guard trips.
 6. Findings tab: **Analyse runs** → ranked weaknesses and score → tick a fix → **Approve and apply** → **Re-run**.
@@ -130,12 +132,13 @@ Findings, Report, Cost views. Docs: [architecture and workflow](docs/ARCHITECTUR
 ## Verified, and not
 - Verified on real Docker (voting app, M2 Mac, Docker 29.8): selftest, crash, hang, ghost votes, network delay and
   packet loss, DB overload, CPU throttle, traffic spike, spike while the worker is down; guard trips and restores;
-  fix and re-run 57 → 74; restore after the tool itself restarts mid-fault. Real runs found and fixed our own bugs
+  fix and re-run 29 → 56.5; restore after the tool itself restarts mid-fault. Real runs found and fixed our own bugs
   (reused voter cookie, `docker update --cpus 0` silently keeping a CPU limit).
-- **Real Bosch hawkBit** (Tejas's M4 Pro, 10–11 Oct): our client drives hawkBit's real management and device APIs
-  (718 devices created, all checked ones `in_sync`); crash, +500 ms latency and the combined failure were injected
-  into the real stack and every container was restored. **Finding:** after a MySQL disruption, hawkBit's API stayed
-  unresponsive (containers running) in 2 of 4 runs until hawkBit was restarted, consistent with database connections
-  that are not re-established. Chaos Sentinel now checks the application itself, not just containers, and restarts
-  and reports a wedged service as a secondary failure.
+- **Real Bosch hawkBit** (Tejas's M4 Pro): 11 Oct final validation on the latest build: selftest 6/6 PASS and 15 real
+  runs across 10 experiment types (crash, hang, network cut, +500 ms latency, traffic spike, RabbitMQ cut + MySQL crash
+  on hawkbit, mysql and rabbitmq); 867 devices through hawkBit's real APIs, 0 stuck; every run restored. Findings above.
+  On 10 Oct an earlier build saw hawkBit's API stay dead after a MySQL disruption in 2 of 4 runs (containers running)
+  until restarted; Chaos Sentinel now checks the application itself and restarts and reports a wedged service.
+- On hawkBit the risk findings in the final session came from the rules fallback (the AI answer failed the number check),
+  and its only fix is code advice, so the before/after re-run is proven on the voting blueprint.
 - Not built: disk-full (safety, see above), Kubernetes.

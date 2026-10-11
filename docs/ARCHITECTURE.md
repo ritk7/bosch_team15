@@ -94,7 +94,7 @@ Phases shown in the UI: **Baseline → Inject → Observe → Restore → Recove
 7 RESTORE    always: finally-block, startup restore, final safety check for secondary failures
 8 EXPLAIN    risk agent writes ranked findings citing measured numbers; deterministic score
 9 FIX        fix agent proposes changes; engineer approves; compose override applied
-10 RE-RUN    same experiments again; score before → after (voting app on real Docker: 57 → 74)
+10 RE-RUN    same experiments again; score before → after (voting blueprint on real Docker: 29 → 56.5)
 ```
 
 ## 5. The 3 AI agents and their guardrails
@@ -141,7 +141,7 @@ harmless experiments never raises the score. Same results, same score. Per-servi
 | Intelligent planning | Campaign tab: twin heatmap, AI ranked plan with reasons, AI vs random computed |
 | Safety limits: error rate, latency, blast radius | `guard.py`, plus wall time |
 | Observe errors, slowdowns, recovery | Live chart, probe counters, recovery window; Prometheus/Grafana overlay |
-| AI-written ranked findings with fixes | Findings tab, `/api/report.md`, `docs/sample-findings-report-voting.md` |
+| AI-written ranked findings with fixes | Findings tab, `/api/report.md`, `docs/sample-findings-report-hawkbit.md` (real hawkBit), `docs/sample-findings-report-voting.md` (blueprint) |
 | Ranked resilience score | Findings tab score + per-service ranking, `score.py` |
 | Architecture overview | this page, `docs/architecture.png`, `/api/architecture.md`, Pipeline tab |
 | Demo video ≤ 3 min, team form | team deliverables |
@@ -149,12 +149,12 @@ harmless experiments never raises the score. Same results, same score. Per-servi
 ### Optional / stretch
 | Item | Status |
 |---|---|
-| Re-run after a fix, score rises | done (57 → 74 on real Docker) |
+| Re-run after a fix, score rises | done on the voting blueprint (29 → 56.5 on real Docker); hawkBit's fixes are code advice |
 | Combined failures | done (4 compound experiments) |
 | Live dashboard | done (Live and Pipeline tabs) |
 | Open-source observability | done (`docker-compose.observability.yml`: Prometheus + Grafana, `/metrics`) |
 | CI gate | done (`python -m app.cli gate --min-score 80`) |
-| Run on Bosch's own software | done: real hawkBit, selftest 6/6 PASS; updates durable (0 stuck in 5 runs), latency-fragile (p95 0.56 → 7–8 s, guard tripped), intermittent wedge seen on 10 Oct; evidence in `docs/evidence/hawkbit-2026-10-11` |
+| Run on Bosch's own software | done: real hawkBit, selftest 6/6 PASS, 15 runs, 867 devices, 0 stuck; crash hawkbit 94.3% errors, not back in 30 s; MySQL trouble p95 0.56 → 4–8 s; score 30/100; `docs/sample-findings-report-hawkbit.md` |
 | Cost proof | done (Cost tab, ledger) |
 | Full disk | not built, on purpose (safety) |
 
