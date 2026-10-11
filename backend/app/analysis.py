@@ -46,7 +46,7 @@ def rules_findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
             impact = "Users notice errors or delays while the fault lasts."
         evidence = [
             f"{exp['id']}: {o['sent']} sent, {o['acked']} acknowledged, {o['stored']} {unit['stored']}, {o['lost']} {unit['lost']}",
-            f"errors {o['error_pct']}%, p95 over the run {round(o['p95_ms'])} ms, peak 3 s p95 {round(o['peak_p95_ms'])} ms, recovery "
+            f"errors {o['error_pct']}%, p95 over the run {round(o['p95_ms'])} ms, peak p95 {round(o['peak_p95_ms'])} ms (worst 3 s window), recovery "
             f"{'not observed (bounded recovery window)' if o['recovery_s'] is None else str(o['recovery_s']) + ' s'}",
         ]
         if o["guard_tripped"]:
@@ -66,6 +66,12 @@ def _numbers(text: str) -> set[str]:
     return set(re.findall(r"\d+(?:\.\d+)?", text))
 
 
+def _invented(said: str, source: str) -> set[str]:
+    """Numbers in `said` that are not in `source`. 20 matches 20.0 and 71 matches 71.4 (rounding is not inventing)."""
+    allowed = [float(x) for x in _numbers(source)] + [200.0, 503.0]  # HTTP status codes are not measurements
+    return {x for x in _numbers(said) if not any(float(x) == a or float(x) == round(a) for a in allowed)}
+
+
 async def findings(results: list[dict], graph: dict, unit: dict, runner_kind: str) -> tuple[list[dict], str, str]:
     base = rules_findings(results, graph, unit, runner_kind)
     if not base:
@@ -73,7 +79,8 @@ async def findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
     prompt = json.dumps({"findings": [{k: f[k] for k in ("id", "service", "severity", "title", "evidence", "impact")}
                                       for f in base]}, separators=(",", ":"))
     system = ("You are a site-reliability engineer. Rewrite each finding's title and impact so an engineer understands "
-              "the weakness and why it matters. Keep ids. Use only numbers that appear in that finding's evidence. "
+              "the weakness and why it matters. Keep ids. Use only numbers that appear in that finding's evidence, copied exactly; never calculate new numbers "
+              "(no differences, sums or percentages of your own). "
               'Reply JSON only: {"findings":[{"id":"F1","title":"...","impact":"..."}]}')
     by_id = {f["id"]: f for f in base}
 
@@ -84,10 +91,10 @@ async def findings(results: list[dict], graph: dict, unit: dict, runner_kind: st
                 or not all(isinstance(r.get("id"), str) for r in rows) or {r.get("id") for r in rows} != set(by_id)):
             return False
         for r in rows:
-            allowed = _numbers(" ".join(by_id[r["id"]]["evidence"]) + " " + by_id[r["id"]]["title"])
+            source = " ".join(by_id[r["id"]]["evidence"]) + " " + by_id[r["id"]]["title"]
             if not all(isinstance(r.get(key), str) and r[key].strip() for key in ("title", "impact")):
                 return False
-            if not _numbers(r["title"] + " " + r["impact"]) <= allowed:
+            if _invented(r["title"] + " " + r["impact"], source):
                 return False  # invented a number
         return True
 
@@ -126,6 +133,23 @@ def rules_fixes(found: list[dict], results: list[dict], graph: dict) -> list[dic
         if unhealed and (o["guard_tripped"] or o["recovery_s"] is None or r.get("notes")):
             for s in unhealed:
                 restart_targets.setdefault(s, []).append(f["id"])
+        tnode = nodes.get(exp["target"], {})
+        slow = o["recovery_s"] is None or o["recovery_s"] > 10
+        if (exp["type"] == "crash" and tnode.get("restart") in SELF_HEAL and tnode.get("replicas", 1) == 1
+                and (o["guard_tripped"] or slow)):
+            t = exp["target"]
+            fixes.append({"id": "", "finding_id": f["id"], "title": f"Run a second {t} replica with a health check",
+                          "change_type": "compose",
+                          "snippet": (f"# Implementation checklist, not a drop-in config\n"
+                                      f"# {t} restarts by itself (restart: {tnode['restart']}), but one replica means an outage while it starts.\n"
+                                      f"services:\n  {t}:\n    deploy:\n      replicas: 2\n    healthcheck:\n"
+                                      "      test: [\"CMD-SHELL\", \"<a request that also reads from the database>\"]\n"
+                                      "      interval: 10s\n      retries: 3\n"
+                                      "# Put a load balancer in front so one crashed replica does not stop the service."),
+                          "steps": [f"Run two {t} replicas behind a load balancer, so a crash of one does not stop the service.",
+                                    "Add a health check that exercises the database, so a wedged replica is restarted."],
+                          "expected_score_gain": round(min(30.0, score.penalty(r, fan.get(t, 0))[0] * 0.3), 1),
+                          "auto_applicable": False})
         if o["lost"] > 0 and any(nodes.get(s, {}).get("role") in ("queue", "cache") for s in services):
             q = next(s for s in services if nodes.get(s, {}).get("role") in ("queue", "cache"))
             redis = "redis" in str(nodes[q].get("image", "")).lower()

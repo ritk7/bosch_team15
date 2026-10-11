@@ -78,3 +78,28 @@ def test_restart_policy_does_not_claim_to_recover_paused_mysql():
     prediction = agents.rules_prediction(sample(kind="hang")["experiment"], graph, entry="hawkbit",
                                          sync={"hawkbit", "mysql"}, rate=2, fault_s=10, history=[], unit_plural="devices")
     assert "it restarts by itself" not in prediction["reason"]
+
+
+def test_rounding_is_not_inventing_a_number():
+    """'20-second recovery' for measured 20.0 s is the same number; 21 is invented."""
+    from app.analysis import _invented
+
+    src = "errors 80.0%, recovery 20.0 s; guard: Error rate 71.4% reached the 60% limit"
+    assert _invented("Recovery took 20 seconds at 80% errors and 71% error rate", src) == set()
+    assert _invented("Recovery took 21 seconds", src) == {"21"}
+    assert _invented("clients got HTTP 200", src) == set() and _invented("breached by 2004 ms", src) == {"2004"}
+
+
+def test_slow_single_replica_that_self_heals_gets_a_replica_fix():
+    """hawkBit already has restart: always, yet a crash is an outage while it starts: recommend a second replica."""
+    from app import analysis, targets
+
+    t = targets.load("hawkbit")
+    g = t.graph()
+    r = {"run_id": "r1", "label": "before", "started_at": 1, "experiment": {"id": "crash-hawkbit", "type": "crash", "target": "hawkbit",
+         "title": "Crash hawkbit", "params": {}}, "notes": [],
+         "outcome": {"sent": 50, "acked": 10, "stored": 10, "lost": 0, "errors": 40, "error_pct": 80.0, "p95_ms": 74, "peak_p95_ms": 80,
+                     "recovery_s": 20.0, "guard_tripped": True, "guard_reason": "Error rate 71%", "data_loss": False, "availability_pct": 20.0}}
+    found = analysis.rules_findings([r], g, t.unit, "sim")
+    fixes = analysis.rules_fixes(found, [r], g)
+    assert any("second hawkbit replica" in x["title"] and not x["auto_applicable"] for x in fixes)
