@@ -1,7 +1,7 @@
 # Team form (copy into the submission portal)
 
 **Team name:** No-15 "Lil bosch"
-**Members:** Ritwik Katta, Nandan Murali Nari, Akram Lateef, Tejas, Akhilesh K
+**Members:** Ritwik Katta, Nandan Murali Nair, Akram Lateef, Tejas, Akhilesh K
 **Project:** Chaos Sentinel: an AI that predicts what a failure will do, injects it safely behind a plain-code kill switch,
 proves every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.
 **Repository:** https://github.com/ritk7/bosch_team15

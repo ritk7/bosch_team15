@@ -3,7 +3,7 @@
 **An AI that predicts what a failure will do, breaks your app safely behind a kill switch that is plain code, proves
 every unit of work that silently disappeared, recommends the fix, and re-runs to prove the fix worked.**
 
-Bosch AI hackathon 2026 · Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nari, Akram Lateef, Tejas, Akhilesh K.
+Bosch AI hackathon 2026 · Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nair, Akram Lateef, Tejas, Akhilesh K.
 
 Targets: Docker's open-source [example-voting-app](https://github.com/dockersamples/example-voting-app) (5 services) and
 Bosch's [Eclipse hawkBit](https://github.com/eclipse-hawkbit/hawkbit) over-the-air update server (monolith + MySQL + RabbitMQ).

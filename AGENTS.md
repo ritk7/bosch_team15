@@ -1,6 +1,6 @@
 # Chaos Sentinel: the complete story (for the deck, the pitch and the judges)
 
-Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nari, Akram Lateef, Tejas, Akhilesh K.
+Team No-15 "Lil bosch": Ritwik Katta, Nandan Murali Nair, Akram Lateef, Tejas, Akhilesh K.
 Bosch AI Hackathon, 10–11 Oct 2026 · Repo: github.com/ritk7/bosch_team15
 
 ---

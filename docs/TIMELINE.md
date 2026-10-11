@@ -1,6 +1,6 @@
 # Hackathon timeline: Team No-15, "Lil bosch"
 
-Ritwik Katta · Nandan Murali Nari · Akram Lateef · Tejas · Akhilesh K
+Ritwik Katta · Nandan Murali Nair · Akram Lateef · Tejas · Akhilesh K
 
 Every build step below matches a commit on GitHub (`git log` on github.com/ritk7/bosch_team15). Times are Saturday 10 Oct
 2026, local time. Planned steps are marked as plan.
