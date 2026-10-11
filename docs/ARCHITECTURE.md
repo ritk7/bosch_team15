@@ -20,7 +20,7 @@ behind a deterministic kill switch, **measures** every unit of work by id, **res
 ┌─────────────────────────────── API (FastAPI, backend/app/main.py) ────────────────────┐
 │ Engine (campaign.py): phases, one experiment at a time, snapshots, kill switch         │
 │                                                                                        │
-│  Mapper ── Digital twin ── Planner(AI) ── Predictor(AI) ── Injector ── Probe            │
+│  Mapper ── Digital twin ── Planner(AI: plan + predict) ── Injector ── Probe            │
 │                                   Guard (plain code, 0.5 s) ── Restore                 │
 │  Risk(AI) ── Score (formula) ── Fix(AI) ── engineer approval ── compose override        │
 │                                                                                        │
@@ -44,7 +44,7 @@ behind a deterministic kill switch, **measures** every unit of work by id, **res
 | Injectors | `injectors.py` | Crash (true SIGKILL), hang (pause), network cut, delay and loss (tc netem), CPU throttle, DB overload, traffic spike, compound faults |
 | Guard | `guard.py` | Kill switch in plain code, checked every 0.5 s |
 | Engine | `campaign.py` | Runs the phases, persists the active fault, restores on startup, campaigns, twin rehearsal, re-run |
-| AI agents | `planner.py`, `analysis.py`, `agents.py` | Planner, predictor, risk, fix |
+| AI agents | `planner.py`, `analysis.py`, `agents.py` | 3 agents: planner (plans and predicts), risk, fix |
 | Score | `score.py` | Deterministic resilience score with per-service ranking |
 | Fixes | `fixes.py` | Writes the approved compose override; delete the file to undo |
 | Report, CI | `report.py`, `cli.py` | Findings report and architecture overview (markdown); `python -m app.cli gate --min-score 80` |
@@ -56,7 +56,7 @@ behind a deterministic kill switch, **measures** every unit of work by id, **res
 sequenceDiagram
     actor E as Engineer
     participant UI
-    participant P as Planner / Predictor (AI)
+    participant P as Planner agent (AI)
     participant G as Guard (code)
     participant I as Injector
     participant A as Target app
@@ -86,8 +86,8 @@ Phases shown in the UI: **Baseline → Inject → Observe → Restore → Recove
 ```
 1 MAP        compose file → graph (automatic, correctable by hand)
 2 REHEARSE   digital twin runs the whole catalog in seconds → heatmap
-3 PLAN       AI planner ranks every experiment with a reason; coverage guardrail; AI vs random computed on the twin
-4 PREDICT    AI commits to numbers before anything is touched
+3 PLAN       planner agent ranks every experiment with a reason; coverage guardrail; AI vs random computed on the twin
+4 PREDICT    the same planner agent commits to numbers before anything is touched
 5 INJECT     only into a steady app, guard armed, one experiment at a time
 6 MEASURE    every unit checked by id; errors, p95, recovery, silent loss
 7 RESTORE    always: finally-block, startup restore, final safety check for secondary failures
@@ -96,16 +96,15 @@ Phases shown in the UI: **Baseline → Inject → Observe → Restore → Recove
 10 RE-RUN    same experiments again; score before → after (voting app on real Docker: 57 → 74)
 ```
 
-## 5. The AI agents and their guardrails
+## 5. The 3 AI agents and their guardrails
 Every call goes through `llm.complete(...)` with a strict JSON accept check, a time limit, and a rules fallback. Each
 decision is logged in the cost ledger and the UI shows whether AI or rules decided it.
 
 | Agent | Input (compact JSON, never raw logs) | Output | Guardrails |
 |---|---|---|---|
-| Planner | graph summary, catalog, past outcomes, twin results | ranked experiments + reason, next pick, fault window | allow-listed catalog only; a service tested twice is off limits while others are untested; numbers it quotes must exist in measurements; 15 s / 40 s limits |
-| Predictor | experiment, graph, history | errors %, units lost, recovery s | values range-checked; shown next to the measured result |
-| Risk | measured outcomes | ranked findings with evidence | must cite real experiment ids and numbers from those outcomes |
-| Fix | findings, compose file | concrete changes | only restart policies can be applied, and only after approval |
+| 1. Planner | graph summary, catalog, past outcomes, twin results | ranked experiments + reason, next pick, fault window, **and the prediction**: errors %, units lost, recovery s | allow-listed catalog only; a service tested twice is off limits while others are untested; numbers it quotes must exist in measurements; predictions range-checked and shown next to the measured result; 15 s / 40 s limits |
+| 2. Risk | measured outcomes | ranked findings with evidence | must cite real experiment ids and numbers from those outcomes |
+| 3. Fix | findings, compose file | concrete changes | only restart policies can be applied, and only after approval |
 
 Model: Claude Haiku 4.5 (small tier) through an OpenAI-compatible router; optional local Llama 3.2 3B; works with no key at all.
 

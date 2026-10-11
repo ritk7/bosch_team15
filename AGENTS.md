@@ -55,7 +55,7 @@ Seven properties, each one a scoring story:
                                │
        Digital twin ◄──────────┤  simulation built from the app's source code, corrected by real measurements
                                ▼
- Planner agent ─► next experiment + reason ─► Predictor agent ─► expected errors / units lost / recovery
+ Planner agent ─► next experiment + reason ─► prediction: expected errors / units lost / recovery
                                ▼
  Injector (docker CLI, project-scoped) ─► fault ─► target app ◄── Probe: 5 units/s, each id checked in the DB
                                ▲                                     │
@@ -76,19 +76,18 @@ Seven properties, each one a scoring story:
 | Injectors | `injectors.py` | crash (true SIGKILL), hang, network cut, network delay and packet loss (tc netem), CPU throttle, DB overload (query flood + CPU limit), traffic spike, combined failures |
 | Guard | `guard.py` | the kill switch; thresholds below |
 | Engine | `campaign.py` | phases, safety files, campaign, twin, re-run, demo reset |
-| AI agents | `agents.py`, `planner.py`, `analysis.py` | planner, predictor, risk, fix |
+| AI agents | `agents.py`, `planner.py`, `analysis.py` | 3 agents: planner (plans and predicts), risk, fix |
 | Score | `score.py` | deterministic resilience score |
 | Fixes | `fixes.py` | writes the approved override file |
 | Report / CI | `report.py`, `cli.py` | markdown deliverables; `gate --min-score 80` |
 | UI | `frontend/src` | Live, Pipeline, Campaign, Findings, Report, Cost tabs |
 
-### The AI agents (4)
+### The AI agents (3)
 Each agent is one call to a small model with a strict JSON check, plus a rules fallback that works alone. Every decision is logged in the cost ledger.
 
 | Agent | Decides | Guardrail |
 |---|---|---|
-| Planner | ranks every experiment with a reason; picks the next one; chooses the fault window by risk | may only pick from the allow-listed catalog; may not quote numbers we didn't measure; 15 s time limit, then rules |
-| Predictor | expected errors %, units lost, recovery s | numbers must be in range; shown next to the measured result |
+| Planner | ranks every experiment with a reason; picks the next one; chooses the fault window by risk; **predicts** errors %, units lost, recovery s before injecting | may only pick from the allow-listed catalog; may not quote numbers we didn't measure; predictions range-checked and shown next to the measured result; 15 s time limit, then rules |
 | Risk | rewords findings so engineers understand them | ids fixed; any number must already be in the measured evidence |
 | Fix | concrete steps for each fix | only compose restart policies can be applied, and only after approval |
 
@@ -239,7 +238,7 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 1. **Title**: Chaos Sentinel. "Break it on purpose. Prove what broke. Prove the fix."
 2. **Problem**: manual chaos is slow and blind; HTTP 200 can lie (ghost votes).
 3. **Solution**: the closed loop diagram (section 3).
-4. **How it works**: architecture (section 5) in 3 boxes: Planner + Predictor → Injector + Guard → Analyst + Fix.
+4. **How it works**: architecture (section 5) in 3 boxes: Planner (plans + predicts) → Injector + Guard → Risk + Fix.
 5. **Safety**: kill switch in code, scope, restore, approval.
 6. **Live demo** (or video).
 7. **Results**: ghost votes, 57 → 74, twin in 7 s, 3 vs 12 runs, 19 tests (section 8).
@@ -262,7 +261,7 @@ now 3–4 s); stage mode for projectors; one-command `setup.sh`; architecture di
 2. **How do you avoid AI hallucinations?** Every number the AI writes must already be in the measured evidence, or the
    answer is rejected and the rules output is used. The evidence lines are copied from measurements.
 3. **How accurate are predictions?** Shown live as predicted vs measured; wrong predictions show us how the system
-   really behaves. On re-runs the predictor uses what it measured.
+   really behaves. On re-runs the planner uses what it measured.
 4. **How is the score computed?** A deterministic formula in `score.py` with a visible breakdown; same results, same score.
 5. **What does it cost?** Read it from the Cost tab: model calls in paise, compared with a large-model baseline. Rules
    and the cache handle many decisions for free.

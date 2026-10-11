@@ -88,7 +88,7 @@ on every invocation and append to saved run history.
 2. **Confirm and inject**: the worker freezes, Redis dies, units pile up in red on the map, the grid fills amber.
 3. The guard trips and restores; the reveal shows predicted vs measured, and your guess against the AI. Votes lost silently.
    The services that were faulted stay outlined on the map after the restore.
-4. Pipeline tab: the 12 stages (mapper, twin, planner, predictor, injector, guard, probe, restore, risk, score, fix, approve)
+4. Pipeline tab: the 12 stages (mapper, twin, planner, prediction, injector, guard, probe, restore, risk, score, fix, approve)
    as a live wiring diagram; each stage shows its real latest output, the running stage pulses, the wire is cut when the guard trips.
 5. Findings tab: **Analyse runs** → ranked weaknesses and score → tick the restart fix → **Approve and apply** → **Re-run**: score rises.
 6. Campaign tab: **Rehearse all on the twin** (heatmap in seconds), **Rank every experiment** (AI plan with reasons), AI planner against random.

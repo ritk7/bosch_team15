@@ -48,5 +48,5 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 ## How we used AI tools
 - **Claude Code (Opus 5.5)** pair-programmed the build: backend, frontend, tests and Docker verification, with every step
   checked by tests and real runs before committing.
-- **Inside the product**, Claude Haiku 4.5 (through our router) runs the planner, predictor, risk and fix agents. The local
+- **Inside the product**, Claude Haiku 4.5 (through our router) runs the 3 agents: planner (plans and predicts), risk and fix. The local
   Llama 3.2 3B (Ollama) is configured as the free tier. Every agent has a rules fallback, and every call is in the cost ledger.

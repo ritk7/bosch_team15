@@ -63,7 +63,7 @@ export function Pipeline({ state, target }: { state: State; target: Target }) {
       output: state.twin ? `${state.twin.completed ?? state.twin.rows.length} of ${state.twin.attempted ?? state.twin.rows.length} rehearsed${state.twin.seconds ? ` in ${state.twin.seconds} s` : ""}` : "not rehearsed yet" },
     { id: "plan", n: 3, kind: "ai", name: "Planner", status: status(false, !!cur || !!lastPick || !!state.plan),
       output: cur ? `picked: ${cur.experiment.title}` : state.plan ? `ranked ${state.plan.plan.length} experiments` : "waiting for a choice" },
-    { id: "predict", n: 4, kind: "ai", name: "Predictor", status: status(phase === "baseline" && !!cur, !!p),
+    { id: "predict", n: 4, kind: "ai", name: "Planner predicts", status: status(phase === "baseline" && !!cur, !!p),
       output: p ? `${p.expected_error_pct}% errors · ${p.expected_votes_lost} lost · ${p.expected_recovery_s} s` : "commits to numbers first" },
     { id: "inject", n: 5, kind: "code", name: "Injector", status: tripped ? "tripped" : status(inFault, after),
       output: cur ? `${cur.experiment.type.replace("_", " ")} on ${cur.experiment.target}` : "allow-listed failures only" },
