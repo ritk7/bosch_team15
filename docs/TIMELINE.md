@@ -2,10 +2,12 @@
 
 Ritwik Katta · Nandan Murali Nair · Akram Lateef · Tejas · Akhilesh K
 
-Every build step below matches a commit on GitHub (`git log` on github.com/ritk7/bosch_team15). Times are Saturday 10 Oct
-2026, local time. Planned steps are marked as plan.
+All times are **IST (UTC+05:30)**. Day 1 is Saturday, **10 October 2026**; Day 2 is Sunday, **11 October 2026**.
+The original build entries and their commit references are retained from the team timeline; their timestamps have not been independently rechecked.
+Nandan’s testing entries use the shared terminal output, screenshots and exported reports. Testing times are approximate reporting times, not exact execution timestamps.
+Planned work is explicitly marked and is not recorded as completed.
 
-## Day 1: Saturday
+## Day 1: Saturday, 10 October 2026
 
 | Time | What we did | Evidence |
 |---|---|---|
@@ -38,12 +40,49 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
 | Sun 11 Oct | Stress-tested the UI and fixed lag (Docker status cached in the background, `/api/state` in about 1 ms). Redesigned the UI: Live command deck (labelled phase track, compact map that keeps faulted services outlined, run history), new **Pipeline** tab (the 12 stages as a live wiring diagram), coverage note on Findings; checked at 1440 px and 390 px | commit `Redesign the UI` |
 | Sun 11 Oct | **Final real-hawkBit validation** on the latest build (Tejas): selftest 6/6 PASS; crash, slow, freeze MySQL and RabbitMQ cut + MySQL crash: every device updated, recovery 1–8 s; +500 ms on MySQL pushed p95 to 7–8 s and the guard tripped. The 10 Oct wedge did not reproduce. Fixed the report footer to print the live guard limits | `docs/evidence/hawkbit-2026-10-11` |
 
-## Day 2: Sunday (plan)
+### Evening testing — Nandan Murali Nair
 
-| Time | Plan |
+| Time (IST, approximate) | What we did | Evidence / result |
+|---|---|---|
+| 22:12–22:28 | Set up the application on Windows: checked Python, Node.js and Git; created a Python 3.13 virtual environment and installed backend dependencies. | Shared PowerShell output; dependency installation completed. |
+| 22:47 | Checked the hawkBit simulation with a MySQL CPU-throttle experiment. | Shared UI results: 65 units sent, acknowledged and updated; 0 errors and 0 stuck units. Simulation only. |
+| 22:55–22:59 | Moved from a downloaded ZIP to a Git clone so teammate updates could be pulled into the test workspace. Installed dependencies in `ChaosSentinel-git`. | Successful `git clone` and installation output. |
+| 23:58–00:07 (ends Sunday) | Began updating and checking the application; the completed automated-check result was shared after midnight. | See the Sunday 00:07 entry below. |
+
+## Day 2: Sunday, 11 October 2026
+
+### Overnight and morning testing — Nandan Murali Nair
+
+| Time (IST, approximate) | What we did | Evidence / result |
+|---|---|---|
+| 00:07 | Ran `python dev.py check`. | **131 backend tests passed; 5 frontend tests passed; TypeScript check and production build passed.** Backend tests took 90.59 s. One Starlette/httpx deprecation warning was reported; no test failures. |
+| 00:11–00:12 | Checked the hawkBit simulation baseline and MySQL crash experiment, including automatic guard restoration. | Shared UI results: 19 sent, 17 acknowledged/updated, 2 errors (10.5%), 0 stuck; recovery 4.5 s. Guard tripped on latency; all 3 services restored. |
+| 00:17 | Tested the manual kill switch during an experiment. | UI reported “Stopped by kill switch”; all 3 services were running afterward. Remaining waiting/pending counters were flagged for review, not confirmed as a fault-restoration failure. |
+| 00:19 | Ran another experiment after the manual stop to check that testing could continue. | Completed-run count reached 2; all 3 services running. Result showed 19 sent, 17 updated, 2 errors, with no waiting, pending or stuck units. |
+| 00:21 | Reviewed Findings, the resilience-score breakdown and fix recommendations. | Score 84 with a measured guard-threshold finding. The recommendation was advice-only; applying a fix and proving an improvement were not verified in this session. |
+| 00:23–00:24 | Ran a four-experiment hawkBit campaign and digital-twin rehearsal. | Campaign completed; total completed runs reached 6 and all 3 services were running. Twin rehearsed 17 experiments in 9.6 s. Rules-based order needed 17 runs versus a random-order average of 13.5 across 200 shuffles; this run did not demonstrate a planner advantage. |
+| 00:26 | Downloaded and reviewed the findings report and architecture overview. | `hawkbit-findings-report.md` and `architecture.md` exported successfully. Findings report covered 6 simulation runs and score 79. Flagged documentation/UI inconsistencies for teammate review. |
+| 00:28–00:30 | Reviewed the cost ledger and prepared feedback for teammates. | 29 decisions, **0 model calls and ₹0 model spend**, all using the rules engine. The displayed ₹3.70 large-model comparison was hypothetical, not an incurred cost or independently verified saving. |
+| 07:03–07:06 | Prepared to rerun the application and pulled the team's latest changes. | Shared Git output: 27 files changed, including `Pipeline.tsx`, `docs/ARCHITECTURE.md` and `docs/TEAM_FORM.md`. A fresh automated check and manual regression test after this update had not yet been confirmed. |
+
+### Review items from this testing session
+
+- Reconcile the blast-radius guard description in exported documentation with the threshold shown in the UI.
+- Correct inconsistent agent counts/names in the architecture text.
+- Distinguish simulation coverage from real-Docker verification for network latency and packet-loss experiments.
+- Investigate the differing RabbitMQ recovery results between the campaign and twin rehearsal, including their settings.
+- Review waiting/pending counters after a manual stop and the apparently empty ranked-plan area in the captured UI.
+- Make the ledger's rules-only decisions and hypothetical model-cost comparison clear.
+
+These are observations and review requests from the tested version, not claims that every item is a confirmed defect or remains present after the morning update. This session verified local simulation behavior; it did not verify real Docker execution, connected-model behavior, an applied-fix loop, or deployment readiness.
+
+### Remaining Sunday plan — completion not yet confirmed
+
+| Time (IST) | Planned work |
 |---|---|
-| Morning | Run the real hawkBit on a 24 GB M4 Pro: `python dev.py selftest --target hawkbit`, then a campaign and findings on Bosch's own server. |
-| By 15:00 | Feature freeze. Clean run from a fresh clone. Observability overlay (Prometheus, Grafana, cAdvisor). |
+| Morning, after the update | Repeat `python dev.py check` and the manual regression checks on the updated version, including the Pipeline view and the review items above. |
+| Morning | ✅ Done (Tejas): real hawkBit selftest 6/6 PASS, 4 UI experiments, findings, ranked plan, twin; see `docs/evidence/hawkbit-2026-10-11`. |
+| By 15:00 | Feature freeze. Clean run from a fresh clone. Verify the observability overlay (Prometheus, Grafana, cAdvisor). |
 | Afternoon | Three timed rehearsals of the 90-second demo, the 3-minute video, and the five deliverables submitted 30 minutes early. |
 
 ## How we used AI tools
@@ -51,3 +90,5 @@ Every build step below matches a commit on GitHub (`git log` on github.com/ritk7
   checked by tests and real runs before committing.
 - **Inside the product**, Claude Haiku 4.5 (through our router) runs the 3 agents: planner (plans and predicts), risk and fix. The local
   Llama 3.2 3B (Ollama) is configured as the free tier. Every agent has a rules fallback, and every call is in the cost ledger.
+
+- **Testing support:** Nandan used ChatGPT/Codex for setup guidance, interpreting test results and documenting review items. His recorded local test session used the product’s rules fallback, with no model calls.
