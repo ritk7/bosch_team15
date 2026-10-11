@@ -5,8 +5,10 @@ Bosch AI hackathon, 36 hours, team of five. Read this file fully. Open the other
 - `docs/TARGETS.md`: the apps we test (voting app by default, hawkBit optional), their ground truth, the experiment catalog.
 - `docs/DEMO.md`: the judge demo script, pitches, hard questions, checklists. Read it before polishing anything.
 
-Skeleton state: the model router, cost ledger, response cache, cost gauge and design tokens work and are tested.
-`backend/app/main.py` and `frontend/src/App.tsx` are stubs. Everything in section 6 is still to be built.
+**Status (11 Oct 2026): fully built and verified.** Every step in section 6 is done: 135 backend tests and the frontend
+tests pass in CI, a 33-check end-to-end system test passes on real Docker, and the real Bosch hawkBit selftest passes
+(evidence in `docs/evidence/hawkbit-2026-10-11`). This file is the original build brief, kept for reference; for what was
+built and how to verify it, start with `README.md` and `JUDGING.md`.
 
 ## 1. The competition and what is judged
 Bosch's problem: "Build an AI system that intelligently introduces controlled failures into a cloud-native application
@@ -123,9 +125,9 @@ If a request is ambiguous, take the simplest reading and say which in one line. 
 
 ## 10. Commands
 - `pip install -r backend/requirements.txt`; `python dev.py` (API :8000, UI :5173); `python dev.py serve` (one port, demo mode);
-  `python dev.py check` (tests, type check, build); `python dev.py selftest` (real Docker, to be written).
+  `python dev.py check` (tests, type check, build); `python dev.py selftest` (real Docker; `--target hawkbit` for hawkBit).
 - While building: `RUNNER=sim python dev.py`. For the real thing: start Docker Desktop, then `RUNNER=docker python dev.py serve`.
 
-## First prompt to paste
+## First prompt used to start the build (historical; the build is complete)
 "Read CLAUDE.md and docs/CONTRACT.md. Plan Milestone 1 in five bullets and wait for my OK. Then build it with RUNNER=sim first and keep
 `python dev.py check` green."
