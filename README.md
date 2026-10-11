@@ -10,7 +10,19 @@ for devices and vehicles (monolith + MySQL + RabbitMQ). Units of work are device
 Blueprint: Docker's [example-voting-app](https://github.com/dockersamples/example-voting-app), where the method was built
 and proven on an 8 GB laptop before pointing the same tool at hawkBit.
 
-**Architecture and workflow:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (diagram, one-experiment workflow, AI agents, safety, requirement coverage).
+## At a glance
+
+| | |
+|---|---|
+| **Problem** | Chaos engineering by hand is slow, unfocused and risky; health checks say "healthy" while work is silently lost |
+| **What we built** | A closed loop: map → rehearse on a digital twin → AI plans and predicts → inject behind a plain-code kill switch → check every unit by id → restore → AI explains and recommends a fix → engineer approves → re-run proves it |
+| **3 AI agents** | Planner (ranks experiments with reasons, predicts the damage), Risk (ranked findings), Fix (concrete changes). Claude Haiku 4.5 + rules fallback; numbers a model invents are rejected |
+| **Safety** | The guard is code, never a model: error rate ≥ 60%, p95 ≥ max(3 s, 10× baseline), blast radius, 45 s cap; restore in `finally`, undone after a crash, scoped to one compose project |
+| **Real Bosch hawkBit** | 15 real runs, 10 failure types, 867 devices through its real APIs: 0 updates lost; crashing the hawkBit server → 94.3% of updates fail, not back within 30 s; 500 ms DB delay → updates 13× slower ([report](docs/sample-findings-report-hawkbit.md), [raw evidence](docs/evidence/hawkbit-2026-10-11)) |
+| **Fix proven by re-run** | Voting-app blueprint on real Docker: resilience score **29 → 56.5** after an approved `restart: unless-stopped` |
+| **Tested** | 135 backend tests + 33 end-to-end system checks on real Docker + hawkBit selftest 6/6 PASS |
+| **Verify it yourself** | [**JUDGING.md**](JUDGING.md): every claim, the command that proves it, and what you should see |
+| **Docs** | [Architecture and workflow](docs/ARCHITECTURE.md) · [API contract](docs/CONTRACT.md) · [timeline](docs/TIMELINE.md) · [team form](docs/TEAM_FORM.md) |
 
 ## What it does
 
