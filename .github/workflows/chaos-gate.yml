@@ -1,5 +1,5 @@
 # Example CI gate: fail the pipeline when the resilience score is below the threshold.
-# Needs a runner with Docker. Not yet verified; the `gate` command is built in Milestone 5 (see CLAUDE.md).
+# Needs a runner with Docker. Runs on pull requests; the same `gate` command works locally (see JUDGING.md).
 name: chaos-gate
 on:
   pull_request:
